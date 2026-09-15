@@ -117,15 +117,31 @@ async def analyze_source(
             rel_files, zip_warns = ZipGuard.inspect_and_extract_safe(file_path, extract_dir)
             warnings.extend(zip_warns)
             tree = build_directory_tree(extract_dir)
-            _, candidates, _ = find_latex_entrypoint(extract_dir)
-            udm = LatexParser.parse_project(extract_dir, selected_entrypoint=selected_entrypoint)
+            _, candidates, all_tex = find_latex_entrypoint(extract_dir)
+            if all_tex:
+                udm = LatexParser.parse_project(extract_dir, selected_entrypoint=selected_entrypoint)
+            else:
+                docx_files = [os.path.join(root, f) for root, _, files in os.walk(extract_dir) for f in files if f.endswith(".docx")]
+                if docx_files:
+                    udm = DocxParser.parse(docx_files[0])
+                    udm.source_format = "DOCX (ZIP Archive)"
+                else:
+                    raise HTTPException(status_code=400, detail="No valid .tex or .docx manuscript files found in uploaded ZIP archive.")
         elif clean_filename.endswith(".docx"):
             tree = [{"path": clean_filename, "name": clean_filename, "type": "docx", "size": os.path.getsize(file_path)}]
             udm = DocxParser.parse(file_path)
         else:
             # Single TeX file
             tree = [{"path": clean_filename, "name": clean_filename, "type": "code", "size": os.path.getsize(file_path)}]
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as fh:
+                single_tex_content = fh.read()
             udm = UniversalDocumentModel(source_format="LaTeX File")
+            udm.metadata = LatexParser._parse_metadata(single_tex_content)
+            sections, parsed_warns = LatexParser._parse_body(single_tex_content, os.path.dirname(file_path))
+            udm.sections = sections
+            udm.warnings.extend(parsed_warns)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Source parsing error: {str(e)}")
         
@@ -180,6 +196,8 @@ async def analyze_template(
             tree = [{"path": clean_filename, "name": clean_filename, "type": "docx" if clean_filename.endswith(".docx") else "code", "size": os.path.getsize(file_path)}]
             
         spec = TemplateAnalyzer.analyze_destination_template(target_extract_dir if clean_filename.endswith(".zip") else file_path)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Template analysis error: {str(e)}")
     

@@ -56,15 +56,24 @@ export const App: React.FC = () => {
   const [showEntrypointModal, setShowEntrypointModal] = useState<boolean>(false);
 
   useEffect(() => {
-    fetch('/api/presets')
-      .then((res) => res.json())
-      .then((data) => {
-        setPresets(data);
-        if (data && data.length > 0) {
-          handleSelectPreset(data[0]);
+    const loadPresets = async () => {
+      try {
+        let res = await fetch('/api/presets').catch(() => null);
+        if (!res || !res.ok) {
+          res = await fetch('/presets');
         }
-      })
-      .catch(() => {});
+        if (res.ok) {
+          const data = await res.json();
+          setPresets(data);
+          if (data && data.length > 0) {
+            handleSelectPreset(data[0]);
+          }
+        }
+      } catch (e) {
+        console.warn("Error fetching presets:", e);
+      }
+    };
+    loadPresets();
   }, []);
 
   const handleSelectPreset = async (preset: any) => {
@@ -110,10 +119,20 @@ export const App: React.FC = () => {
         srcData.append('selected_entrypoint', overrideEntrypoint || selectedEntrypoint);
       }
 
-      const srcRes = await fetch('/api/analyze-source', { method: 'POST', body: srcData });
+      let srcRes = await fetch('/api/analyze-source', { method: 'POST', body: srcData }).catch(() => null);
+      if (!srcRes || !srcRes.ok) {
+        srcRes = await fetch('/analyze-source', { method: 'POST', body: srcData });
+      }
       if (!srcRes.ok) {
-        const errJson = await srcRes.json().catch(() => ({ detail: srcRes.statusText }));
-        alert("Source Analysis Error: " + (errJson.detail || srcRes.statusText));
+        let detail = srcRes.statusText;
+        try {
+          const errJson = await srcRes.json();
+          detail = errJson.detail || errJson.message || srcRes.statusText;
+        } catch {
+          const text = await srcRes.text().catch(() => '');
+          if (text) detail = text.slice(0, 150);
+        }
+        alert(`Source Analysis Error (${srcRes.status}): ${detail}`);
         return;
       }
       const srcJson = await srcRes.json();
@@ -132,10 +151,21 @@ export const App: React.FC = () => {
       const destData = new FormData();
       destData.append('file', destFile);
       destData.append('job_id', srcJson.job_id);
-      const destRes = await fetch('/api/analyze-template', { method: 'POST', body: destData });
+
+      let destRes = await fetch('/api/analyze-template', { method: 'POST', body: destData }).catch(() => null);
+      if (!destRes || !destRes.ok) {
+        destRes = await fetch('/analyze-template', { method: 'POST', body: destData });
+      }
       if (!destRes.ok) {
-        const errJson = await destRes.json().catch(() => ({ detail: destRes.statusText }));
-        alert("Destination Template Analysis Error: " + (errJson.detail || destRes.statusText));
+        let detail = destRes.statusText;
+        try {
+          const errJson = await destRes.json();
+          detail = errJson.detail || errJson.message || destRes.statusText;
+        } catch {
+          const text = await destRes.text().catch(() => '');
+          if (text) detail = text.slice(0, 150);
+        }
+        alert(`Destination Template Analysis Error (${destRes.status}): ${detail}`);
         return;
       }
       const destJson = await destRes.json();
@@ -185,7 +215,10 @@ export const App: React.FC = () => {
       const formData = new FormData();
       formData.append('job_id', jobId);
 
-      const res = await fetch('/api/convert', { method: 'POST', body: formData });
+      let res = await fetch('/api/convert', { method: 'POST', body: formData }).catch(() => null);
+      if (!res || !res.ok) {
+        res = await fetch('/convert', { method: 'POST', body: formData });
+      }
       const json = await res.json();
 
       clearInterval(interval);
