@@ -144,13 +144,9 @@ export const App: React.FC = () => {
         srcData.append('selected_entrypoint', overrideEntrypoint || selectedEntrypoint);
       }
 
-      let srcRes = await fetch('/api/analyze-source', { method: 'POST', body: srcData }).catch(() => null);
-      if (!srcRes || !srcRes.ok) {
-        setActiveEndpoint('/analyze-source');
-        srcRes = await fetch('/analyze-source', { method: 'POST', body: srcData });
-      }
-
+      const srcRes = await fetch('/api/analyze-source', { method: 'POST', body: srcData });
       setHttpStatus(srcRes.status);
+
       if (!srcRes.ok) {
         let errorData: any = null;
         try {
@@ -159,8 +155,10 @@ export const App: React.FC = () => {
           const text = await srcRes.text().catch(() => '');
           errorData = {
             stage: 'source_analysis',
-            error_code: 'DOCX_PARSE_ERROR',
-            message: `Server returned HTTP ${srcRes.status} error during source analysis.`,
+            error_code: srcRes.status === 404 ? 'ENDPOINT_NOT_FOUND' : 'DOCX_PARSE_ERROR',
+            message: srcRes.status === 404
+              ? 'Source analysis endpoint (/api/analyze-source) was not found on the server.'
+              : `Server returned HTTP ${srcRes.status} error during source analysis.`,
             detail: text.slice(0, 150) || srcRes.statusText,
             reference_id: `REF-SRC-${Date.now().toString(36).toUpperCase()}`
           };
@@ -192,13 +190,9 @@ export const App: React.FC = () => {
       destData.append('file', destFile);
       destData.append('job_id', srcJson.job_id);
 
-      let destRes = await fetch('/api/analyze-template', { method: 'POST', body: destData }).catch(() => null);
-      if (!destRes || !destRes.ok) {
-        setActiveEndpoint('/analyze-template');
-        destRes = await fetch('/analyze-template', { method: 'POST', body: destData });
-      }
-
+      const destRes = await fetch('/api/analyze-template', { method: 'POST', body: destData });
       setHttpStatus(destRes.status);
+
       if (!destRes.ok) {
         let errorData: any = null;
         try {
@@ -207,8 +201,10 @@ export const App: React.FC = () => {
           const text = await destRes.text().catch(() => '');
           errorData = {
             stage: 'template_analysis',
-            error_code: 'TEMPLATE_ANALYSIS_ERROR',
-            message: `Server returned HTTP ${destRes.status} error during template analysis.`,
+            error_code: destRes.status === 404 ? 'ENDPOINT_NOT_FOUND' : 'TEMPLATE_ANALYSIS_ERROR',
+            message: destRes.status === 404
+              ? 'Destination template analysis endpoint (/api/analyze-template) was not found on the server.'
+              : `Server returned HTTP ${destRes.status} error during template analysis.`,
             detail: text.slice(0, 150) || destRes.statusText,
             reference_id: `REF-DEST-${Date.now().toString(36).toUpperCase()}`
           };
@@ -291,12 +287,7 @@ export const App: React.FC = () => {
         formData.append('spec_json_str', JSON.stringify(destSpec));
       }
 
-      let res = await fetch('/api/convert', { method: 'POST', body: formData }).catch(() => null);
-      if (!res || !res.ok) {
-        setActiveEndpoint('/convert');
-        res = await fetch('/convert', { method: 'POST', body: formData });
-      }
-
+      const res = await fetch('/api/convert', { method: 'POST', body: formData });
       setHttpStatus(res.status);
       const json = await res.json();
 

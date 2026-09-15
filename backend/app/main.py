@@ -55,6 +55,16 @@ DIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "
 if os.path.exists(SAMPLES_DIR):
     app.mount("/samples", StaticFiles(directory=SAMPLES_DIR), name="samples")
 
+@app.get("/api/health")
+@app.get("/health")
+def health_check():
+    """Health check endpoint to verify backend API reachability."""
+    return {
+        "status": "ok",
+        "service": "universal-academic-converter",
+        "environment": "production"
+    }
+
 @app.get("/api/presets")
 @app.get("/presets")
 def get_presets():
