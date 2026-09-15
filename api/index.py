@@ -1,51 +1,30 @@
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+import os
+import sys
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
+
+api_dir = os.path.dirname(os.path.abspath(__file__))
+if api_dir not in sys.path:
+    sys.path.insert(0, api_dir)
+
+backend_dir = os.path.abspath(os.path.join(api_dir, "..", "backend"))
+if os.path.exists(backend_dir) and backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
+from app.main import app as backend_app
 
 app = FastAPI()
 
-import_status = {}
+@app.get("/debug-scope")
+@app.get("/api/debug-scope")
+def debug_scope(request: Request):
+    return {
+        "url_path": request.url.path,
+        "scope_path": request.scope.get("path"),
+        "scope_root_path": request.scope.get("root_path"),
+        "scope_raw_path": request.scope.get("raw_path").decode("utf-8") if request.scope.get("raw_path") else None,
+        "headers": dict(request.headers)
+    }
 
-try:
-    import docx
-    import_status["docx"] = "OK"
-except Exception as e:
-    import_status["docx"] = str(e)
-
-try:
-    import pylatexenc
-    import_status["pylatexenc"] = "OK"
-except Exception as e:
-    import_status["pylatexenc"] = str(e)
-
-try:
-    import reportlab
-    import_status["reportlab"] = "OK"
-except Exception as e:
-    import_status["reportlab"] = str(e)
-
-try:
-    import lxml
-    import_status["lxml"] = "OK"
-except Exception as e:
-    import_status["lxml"] = str(e)
-
-try:
-    import PIL
-    import_status["pillow"] = "OK"
-except Exception as e:
-    import_status["pillow"] = str(e)
-
-try:
-    from app.main import app as backend_app
-    import_status["backend_app"] = "OK"
-    app = backend_app
-except Exception as e:
-    import_status["backend_app"] = str(e)
-
-    @app.get("/api/health")
-    @app.get("/health")
-    def health():
-        return {
-            "status": "ok",
-            "import_status": import_status
-        }
+# Mount backend_app under FastAPI or delegate all routes
+app.mount("/", backend_app)
