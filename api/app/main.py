@@ -52,25 +52,6 @@ app.add_middleware(
 )
 
 @app.middleware("http")
-async def handle_multipart_limits(request: Request, call_next):
-    content_type = request.headers.get("content-type", "")
-    if "multipart/form-data" in content_type:
-        try:
-            await request._get_form(max_part_size=MAX_PART_SIZE)
-        except Exception as exc:
-            return JSONResponse(
-                status_code=400,
-                content=create_error_payload(
-                    stage="request_validation",
-                    error_code="PAYLOAD_TOO_LARGE",
-                    message="Uploaded manuscript, template, or form field exceeded maximum size limit (50 MB).",
-                    detail=str(exc),
-                    ref_id=f"REF-{uuid.uuid4().hex[:8].upper()}"
-                )
-            )
-    return await call_next(request)
-
-@app.middleware("http")
 async def normalize_vercel_path(request, call_next):
     raw_path = request.scope.get("path", "")
     for prefix in ["/backend/app/main.py", "/backend/app/main", "/api/index.py", "/api/index", "/index.py"]:
