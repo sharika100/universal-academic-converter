@@ -2,34 +2,19 @@
   "version": 2,
   "builds": [
     {
-      "src": "frontend/package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "dist"
-      }
-    },
-    {
-      "src": "api/index.py",
+      "src": "backend/app/main.py",
       "use": "@vercel/python"
     }
   ],
   "functions": {
-    "api/index.py": {
+    "backend/app/main.py": {
       "maxDuration": 60
     }
   },
   "routes": [
     {
-      "src": "/api/(.*)",
-      "dest": "api/index.py"
-    },
-    {
-      "src": "/samples/(.*)",
-      "dest": "api/index.py"
-    },
-    {
       "src": "/(.*)",
-      "dest": "frontend/$1"
+      "dest": "backend/app/main.py"
     }
   ]
 }
