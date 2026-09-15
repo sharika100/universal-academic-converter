@@ -42,16 +42,22 @@ app.add_middleware(
 @app.middleware("http")
 async def normalize_vercel_path(request, call_next):
     raw_path = request.scope.get("path", "")
-    if raw_path.startswith("/backend/app/main.py"):
-        clean_path = raw_path.replace("/backend/app/main.py", "")
-        request.scope["path"] = clean_path if clean_path else "/"
-    elif raw_path.startswith("/backend/app/main"):
-        clean_path = raw_path.replace("/backend/app/main", "")
-        request.scope["path"] = clean_path if clean_path else "/"
-    elif raw_path.startswith("/api/index.py"):
-        clean_path = raw_path.replace("/api/index.py", "")
-        request.scope["path"] = clean_path if clean_path else "/"
+    for prefix in ["/backend/app/main.py", "/backend/app/main", "/api/index.py", "/api/index", "/index.py"]:
+        if raw_path.startswith(prefix):
+            clean_path = raw_path[len(prefix):]
+            request.scope["path"] = clean_path if clean_path else "/"
+            break
     return await call_next(request)
+
+@app.exception_handler(404)
+async def custom_404_handler(request: Request, exc):
+    path = request.scope.get("path", "")
+    if path.startswith("/api/") and not (path.startswith("/api/index.py") or path.startswith("/api/index")):
+        return JSONResponse(status_code=404, content={"detail": f"API endpoint not found: {path}"})
+    index_file = os.path.join(STATIC_DIR, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
+    return HTMLResponse(content=INLINE_INDEX_HTML, media_type="text/html")
 
 TEMP_STORAGE = os.path.join(tempfile.gettempdir(), "universal_converter_storage")
 os.makedirs(TEMP_STORAGE, exist_ok=True)
