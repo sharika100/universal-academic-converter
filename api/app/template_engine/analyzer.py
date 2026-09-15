@@ -62,6 +62,7 @@ class TemplateAnalyzer:
             try:
                 with open(main_p, "r", encoding="utf-8", errors="ignore") as fh:
                     sample_content = fh.read()
+                    spec.sample_content = sample_content
                     
                 cls_match = re.search(r'\\documentclass(?:\[([^\]]*)\])?\{([^}]+)\}', sample_content)
                 if cls_match:

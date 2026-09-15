@@ -104,18 +104,26 @@ class LatexRenderer:
     def _generate_main_tex(udm: UniversalDocumentModel, spec: TemplateSpecification) -> str:
         lines = []
         
-        opts = f"[{','.join(spec.class_options)}]" if spec.class_options else ""
-        cls = spec.document_class or "article"
-        lines.append(f"\\documentclass{opts}{{{cls}}}")
-        lines.append("\\usepackage{graphicx}")
-        lines.append("\\usepackage{amsmath,amssymb}")
-        lines.append("\\usepackage{booktabs}")
-        lines.append("\\usepackage{url}")
-        
-        if spec.citation_system == "natbib":
-            lines.append("\\usepackage{natbib}")
+        if spec.sample_content and "\\begin{document}" in spec.sample_content:
+            preamble = spec.sample_content.split("\\begin{document}")[0].strip()
+            for pkg in ["graphicx", "amsmath", "amssymb", "booktabs", "url"]:
+                if f"\\usepackage{{{pkg}}}" not in preamble and f"\\usepackage[{pkg}]" not in preamble:
+                    preamble += f"\n\\usepackage{{{pkg}}}"
+            lines.append(preamble)
+            lines.append("\n\\begin{document}\n")
+        else:
+            opts = f"[{','.join(spec.class_options)}]" if spec.class_options else ""
+            cls = spec.document_class or "article"
+            lines.append(f"\\documentclass{opts}{{{cls}}}")
+            lines.append("\\usepackage{graphicx}")
+            lines.append("\\usepackage{amsmath,amssymb}")
+            lines.append("\\usepackage{booktabs}")
+            lines.append("\\usepackage{url}")
             
-        lines.append("\n\\begin{document}\n")
+            if spec.citation_system == "natbib":
+                lines.append("\\usepackage{natbib}")
+                
+            lines.append("\n\\begin{document}\n")
         
         # Title
         lines.append(f"\\title{{{udm.metadata.title}}}")

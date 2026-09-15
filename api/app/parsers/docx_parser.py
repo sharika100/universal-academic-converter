@@ -280,64 +280,96 @@ class DocxParser:
         return found_rids
 
     @staticmethod
-    def _parse_author_header(lines: List[str]) -> Tuple[List[Author], List[Affiliation]]:
+    def _parse_author_header(header_data: List[Dict[str, Any]]) -> Tuple[List[Author], List[Affiliation], str]:
         authors: List[Author] = []
         affiliations: List[Affiliation] = []
+        raw_lines = [d["full_text"] for d in header_data if d["full_text"]]
+        raw_header_str = "\n".join(raw_lines)
         
-        author_lines = []
-        affil_lines = []
+        author_entries = []
+        affil_entries = []
         
-        for line in lines:
-            line_str = line.strip()
-            if not line_str or line_str.lower().startswith("abstract"):
-                break
-            # If contains department/university/institute/college/school/laboratory
-            if any(kw in line_str.lower() for kw in ["department", "university", "institute", "college", "school", "laboratory", "center", "centre", "dept", "inc", "ltd"]):
-                affil_lines.append(line_str)
+        for d in header_data:
+            line_str = d["full_text"]
+            if not line_str:
+                continue
+            line_lower = line_str.lower()
+            if line_lower.startswith(("abstract", "keyword", "intro", "table", "fig", "reference")):
+                continue
+            # Detect affiliation keywords
+            if any(kw in line_lower for kw in ["department", "university", "institute", "college", "school", "laboratory", "center", "centre", "dept", "inc", "ltd"]):
+                affil_entries.append(d)
             elif "@" in line_str:
                 # Email line
                 pass
             else:
-                author_lines.append(line_str)
+                author_entries.append(d)
                 
         # Parse affiliations first
         affil_map = {}
-        for idx, aff_text in enumerate(affil_lines):
-            # Check for leading number tag e.g. "1 Department of..." or "^1 Department..."
-            m = re.match(r'^(?:[\$\^\#\[\(]?(\d+)[\$\^\#\]\)]?\s*)?(.*)', aff_text)
+        for idx, aff_d in enumerate(affil_entries):
+            text = aff_d["full_text"]
+            m = re.match(r'^(?:[\$\^\#\[\(]?(\d+)[\$\^\#\]\)]?\s*)?(.*)', text)
             aff_id = m.group(1) if (m and m.group(1)) else str(idx + 1)
-            clean_inst = m.group(2).strip() if m else aff_text
-            affil_obj = Affiliation(id=aff_id, institution=clean_inst, raw_text=aff_text)
-            affiliations.append(affil_obj)
-            affil_map[aff_id] = affil_obj
+            clean_inst = m.group(2).strip() if m else text
+            
+            aff_obj = Affiliation(id=aff_id, institution=clean_inst, raw_text=text)
+            affiliations.append(aff_obj)
+            affil_map[aff_id] = aff_obj
             
         # Parse authors
-        for a_line in author_lines:
-            # Split multiple authors separated by commas or 'and'
-            raw_tokens = [t.strip() for t in re.split(r',|\band\b', a_line) if t.strip()]
-            for token in raw_tokens:
-                # Check for affiliation tags attached to name, e.g. "Alice Smith1,2" or "Alice Smith 1" or "Alice Smith*"
-                m = re.match(r'^(.*?)(?:[\$\^\#\[\(]?([\d\*\,\s]+)[\$\^\#\]\)]?)?$', token)
+        for a_d in author_entries:
+            line_str = a_d["full_text"]
+            line_lower = line_str.lower()
+            if line_lower.startswith(("abstract", "keyword", "intro", "table", "fig")):
+                continue
+            # Extract superscript run text markers if present
+            superscripts = [r["text"].strip() for r in a_d["runs"] if r["is_super"] and r["text"].strip()]
+            
+            # Replace commas between digits in affiliation tags e.g. "1,2" -> "1;2" to avoid splitting author names on tag commas
+            line_str_clean = re.sub(r'(\d)\s*,\s*(\d)', r'\1;\2', line_str)
+            
+            # Split tokens by comma or 'and'
+            tokens = [t.strip() for t in re.split(r',|\band\b|&', line_str_clean) if t.strip()]
+            for token in tokens:
+                token_norm = token.replace(";", ",")
+                m = re.match(r'^(.*?)(?:[\$\^\#\[\(]?([\d\*\,\s]+)[\$\^\#\]\)]?)?$', token_norm)
                 if m:
                     name_part = m.group(1).strip()
                     tag_part = m.group(2) if m.group(2) else ""
                     
-                    if not name_part or len(name_part) < 2:
+                    if not name_part or len(name_part) < 2 or name_part.lower().startswith(("abstract", "keyword")):
                         continue
                         
                     aff_ids = [t.strip() for t in re.findall(r'\d+', tag_part)]
+                    if not aff_ids and superscripts:
+                        aff_ids = [s for s in superscripts if s.isdigit()]
+                        
                     is_corr = "*" in tag_part or "corresponding" in token.lower()
                     
-                    # If no explicit tag, assign default 1
                     if not aff_ids and affiliations:
                         aff_ids = [affiliations[0].id]
                     elif not aff_ids:
                         aff_ids = ["1"]
                         
+                    parts = name_part.split()
+                    g_name = parts[0] if parts else ""
+                    s_name = " ".join(parts[1:]) if len(parts) > 1 else ""
+                    
+                    email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', token)
+                    email = email_match.group(0) if email_match else None
+                    
+                    orcid_match = re.search(r'\d{4}-\d{4}-\d{4}-[\dxX]{4}', token)
+                    orcid = orcid_match.group(0) if orcid_match else None
+                    
                     authors.append(Author(
                         name=name_part,
+                        given_name=g_name,
+                        surname=s_name,
+                        email=email,
                         affiliation_ids=aff_ids,
-                        corresponding=is_corr
+                        corresponding=is_corr,
+                        orcid=orcid
                     ))
                     
-        return authors, affiliations
+        return authors, affiliations, raw_header_str

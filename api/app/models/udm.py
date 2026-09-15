@@ -3,6 +3,8 @@ from pydantic import BaseModel, Field
 
 class Author(BaseModel):
     name: str
+    given_name: Optional[str] = None
+    surname: Optional[str] = None
     email: Optional[str] = None
     affiliation_ids: List[str] = Field(default_factory=list)
     corresponding: bool = False
@@ -23,6 +25,7 @@ class Metadata(BaseModel):
     abstract: str = ""
     keywords: List[str] = Field(default_factory=list)
     custom_metadata: Dict[str, Any] = Field(default_factory=dict)
+    header_raw_text: Optional[str] = None
 
 class InlineElement(BaseModel):
     element_type: str  # text, math, citation, ref, footnote
@@ -55,12 +58,19 @@ class Equation(BaseModel):
 class Figure(BaseModel):
     type: str = "figure"
     id: str
+    occurrence_id: Optional[str] = None
+    rel_id: Optional[str] = None
+    original_filename: Optional[str] = None
+    media_path: Optional[str] = None
+    content_type: Optional[str] = "image/png"
+    sha256: Optional[str] = None
     caption: str = ""
     label: Optional[str] = None
     image_filename: str = ""
     image_data_b64: Optional[str] = None
     width_hint: Optional[str] = "0.8\\linewidth"
     original_path: Optional[str] = None
+    position_index: int = 0
 
 class TableCell(BaseModel):
     content: str
@@ -108,7 +118,7 @@ class UniversalDocumentModel(BaseModel):
     appendices: List[Section] = Field(default_factory=list)
     references: List[Reference] = Field(default_factory=list)
     cross_references: Dict[str, str] = Field(default_factory=dict)
-    conversion_mode: str = "FORMAT_ONLY" # "FORMAT_ONLY", "FORMAT_STRUCTURAL_FIX", "FORMAT_SUBMISSION_CHECK"
+    conversion_mode: str = "FORMAT_ONLY"
     parsing_confidence: float = 96.0
     warnings: List[str] = Field(default_factory=list)
     source_format: str = "unknown"
