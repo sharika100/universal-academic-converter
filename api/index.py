@@ -1,13 +1,51 @@
-import os
-import sys
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
-# Add api directory to sys.path so Vercel serverless environment resolves the bundled 'app' package
-api_dir = os.path.dirname(os.path.abspath(__file__))
-if api_dir not in sys.path:
-    sys.path.insert(0, api_dir)
+app = FastAPI()
 
-backend_dir = os.path.abspath(os.path.join(api_dir, "..", "backend"))
-if os.path.exists(backend_dir) and backend_dir not in sys.path:
-    sys.path.insert(0, backend_dir)
+import_status = {}
 
-from app.main import app
+try:
+    import docx
+    import_status["docx"] = "OK"
+except Exception as e:
+    import_status["docx"] = str(e)
+
+try:
+    import pylatexenc
+    import_status["pylatexenc"] = "OK"
+except Exception as e:
+    import_status["pylatexenc"] = str(e)
+
+try:
+    import reportlab
+    import_status["reportlab"] = "OK"
+except Exception as e:
+    import_status["reportlab"] = str(e)
+
+try:
+    import lxml
+    import_status["lxml"] = "OK"
+except Exception as e:
+    import_status["lxml"] = str(e)
+
+try:
+    import PIL
+    import_status["pillow"] = "OK"
+except Exception as e:
+    import_status["pillow"] = str(e)
+
+try:
+    from app.main import app as backend_app
+    import_status["backend_app"] = "OK"
+    app = backend_app
+except Exception as e:
+    import_status["backend_app"] = str(e)
+
+    @app.get("/api/health")
+    @app.get("/health")
+    def health():
+        return {
+            "status": "ok",
+            "import_status": import_status
+        }
