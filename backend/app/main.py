@@ -75,6 +75,11 @@ if os.path.exists(SAMPLES_DIR):
     app.mount("/samples", StaticFiles(directory=SAMPLES_DIR), name="samples")
 
 @app.get("/")
+@app.get("/backend/app/main.py")
+@app.get("/backend/app/main.py/")
+@app.get("/backend/app/main")
+@app.get("/api/index.py")
+@app.get("/api/index.py/")
 def root_endpoint():
     index_file = os.path.join(STATIC_DIR, "index.html")
     if os.path.exists(index_file):
@@ -87,6 +92,10 @@ def root_endpoint():
 
 @app.get("/api/health")
 @app.get("/health")
+@app.get("/backend/app/main.py/api/health")
+@app.get("/backend/app/main.py/health")
+@app.get("/api/index.py/api/health")
+@app.get("/api/index.py/health")
 def health_check():
     """Health check endpoint to verify backend API reachability."""
     return {
@@ -97,6 +106,10 @@ def health_check():
 
 @app.get("/api/presets")
 @app.get("/presets")
+@app.get("/backend/app/main.py/api/presets")
+@app.get("/backend/app/main.py/presets")
+@app.get("/api/index.py/api/presets")
+@app.get("/api/index.py/presets")
 def get_presets():
     """Returns pre-loaded sample workflow packages."""
     return [
@@ -131,6 +144,10 @@ def get_presets():
 
 @app.post("/api/analyze-source")
 @app.post("/analyze-source")
+@app.post("/backend/app/main.py/api/analyze-source")
+@app.post("/backend/app/main.py/analyze-source")
+@app.post("/api/index.py/api/analyze-source")
+@app.post("/api/index.py/analyze-source")
 async def analyze_source(
     file: UploadFile = File(...),
     selected_entrypoint: Optional[str] = Form(None)
@@ -253,6 +270,10 @@ async def analyze_source(
 
 @app.post("/api/analyze-template")
 @app.post("/analyze-template")
+@app.post("/backend/app/main.py/api/analyze-template")
+@app.post("/backend/app/main.py/analyze-template")
+@app.post("/api/index.py/api/analyze-template")
+@app.post("/api/index.py/analyze-template")
 async def analyze_template(
     file: UploadFile = File(...),
     job_id: str = Form(...)
@@ -327,6 +348,10 @@ async def analyze_template(
 
 @app.post("/api/convert")
 @app.post("/convert")
+@app.post("/backend/app/main.py/api/convert")
+@app.post("/backend/app/main.py/convert")
+@app.post("/api/index.py/api/convert")
+@app.post("/api/index.py/convert")
 async def convert_document(
     job_id: str = Form(...),
     udm_json_str: Optional[str] = Form(None),
@@ -452,6 +477,10 @@ async def convert_document(
 
 @app.get("/api/download/{job_id}/{file_kind}")
 @app.get("/download/{job_id}/{file_kind}")
+@app.get("/backend/app/main.py/api/download/{job_id}/{file_kind}")
+@app.get("/backend/app/main.py/download/{job_id}/{file_kind}")
+@app.get("/api/index.py/api/download/{job_id}/{file_kind}")
+@app.get("/api/index.py/download/{job_id}/{file_kind}")
 def download_file(job_id: str, file_kind: str):
     output_dir = os.path.join(TEMP_STORAGE, job_id, "output")
     
