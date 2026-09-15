@@ -6,8 +6,22 @@ import { DestinationPanel } from './components/DestinationPanel';
 import { AnalysisView } from './components/AnalysisView';
 import { ReportView } from './components/ReportView';
 import { PdfPreviewModal } from './components/PdfPreviewModal';
+import { StructureModal } from './components/StructureModal';
 import { Footer } from './components/Footer';
-import { Play, Search, CheckCircle, RefreshCw, Loader2, FileCode } from 'lucide-react';
+import { Play, Search, Loader2, ArrowRight, ShieldCheck } from 'lucide-react';
+
+const PROGRESS_STEPS = [
+  "1. Uploading files",
+  "2. Extracting project archives",
+  "3. Analyzing source manuscript",
+  "4. Analyzing destination template",
+  "5. Building Universal Document Model (UDM)",
+  "6. Mapping source content onto destination",
+  "7. Generating new target LaTeX project",
+  "8. Compiling target PDF preview in sandbox",
+  "9. Validating content integrity & template rules",
+  "10. Preparing download package"
+];
 
 export const App: React.FC = () => {
   const [presets, setPresets] = useState<any[]>([]);
@@ -23,13 +37,18 @@ export const App: React.FC = () => {
   const [destTree, setDestTree] = useState<any[]>([]);
   const [destSpec, setDestSpec] = useState<any | null>(null);
 
+  const [conversionMode, setConversionMode] = useState<string>('FORMAT_ONLY');
+
   const [jobId, setJobId] = useState<string | null>(null);
   const [mapping, setMapping] = useState<any | null>(null);
   const [report, setReport] = useState<any | null>(null);
 
   const [analyzing, setAnalyzing] = useState<boolean>(false);
   const [converting, setConverting] = useState<boolean>(false);
+  const [progressStep, setProgressStep] = useState<number>(0);
+
   const [showPdfModal, setShowPdfModal] = useState<boolean>(false);
+  const [activeStructureModal, setActiveStructureModal] = useState<'source' | 'dest' | null>(null);
 
   useEffect(() => {
     fetch('/api/presets')
@@ -52,7 +71,6 @@ export const App: React.FC = () => {
     setReport(null);
     setMapping(null);
 
-    // Load sample files from server presets
     try {
       const srcRes = await fetch(preset.source_file);
       const srcBlob = await srcRes.blob();
@@ -139,12 +157,22 @@ export const App: React.FC = () => {
     if (!jobId) return;
 
     setConverting(true);
+    setProgressStep(0);
+
+    // Animate progress steps
+    const interval = setInterval(() => {
+      setProgressStep((prev) => (prev < PROGRESS_STEPS.length - 1 ? prev + 1 : prev));
+    }, 450);
+
     try {
       const formData = new FormData();
       formData.append('job_id', jobId);
 
       const res = await fetch('/api/convert', { method: 'POST', body: formData });
       const json = await res.json();
+
+      clearInterval(interval);
+      setProgressStep(PROGRESS_STEPS.length - 1);
 
       if (json.status === 'SUCCESS') {
         setReport(json.report);
@@ -155,6 +183,7 @@ export const App: React.FC = () => {
         alert("Conversion error: " + (json.detail || 'Unknown failure'));
       }
     } catch (err) {
+      clearInterval(interval);
       alert("Error executing compiler conversion: " + err);
     } finally {
       setConverting(false);
@@ -171,6 +200,7 @@ export const App: React.FC = () => {
         selectedPresetId={selectedPreset?.id}
       />
 
+      {/* Main Studio 2-Column Grid */}
       <div className="studio-grid">
         <SourcePanel
           format={sourceFormat}
@@ -179,6 +209,7 @@ export const App: React.FC = () => {
           fileTree={sourceTree}
           onFileUpload={(f) => setSourceFile(f)}
           analysisDone={!!sourceUdm}
+          onViewStructure={() => setActiveStructureModal('source')}
         />
 
         <DestinationPanel
@@ -188,10 +219,43 @@ export const App: React.FC = () => {
           fileTree={destTree}
           onFileUpload={(f) => setDestFile(f)}
           analysisDone={!!destSpec}
+          onViewStructure={() => setActiveStructureModal('dest')}
         />
       </div>
 
-      {/* Action Bar */}
+      {/* Mode Selector */}
+      <div style={{ background: '#111827', border: '1px solid #1F2937', borderRadius: '12px', padding: '16px 20px', marginBottom: '24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', fontWeight: 600, color: '#F8FAFC' }}>
+          <ShieldCheck color="#10B981" size={18} /> Conversion Mode:
+        </div>
+
+        <div style={{ display: 'flex', gap: '12px' }}>
+          {[
+            { id: 'FORMAT_ONLY', label: 'FORMAT ONLY (Default - 0 Content Rewrite)', desc: 'Safest mode. Preserves text 100% strictly.' },
+            { id: 'FORMAT_STRUCTURAL_FIX', label: 'FORMAT + STRUCTURAL FIX', desc: 'Fixes safe structural hierarchy.' },
+            { id: 'FORMAT_SUBMISSION_CHECK', label: 'FORMAT + SUBMISSION CHECK', desc: 'Converts and validates against target template.' }
+          ].map((mode) => (
+            <button
+              key={mode.id}
+              onClick={() => setConversionMode(mode.id)}
+              style={{
+                background: conversionMode === mode.id ? 'rgba(16, 185, 129, 0.15)' : '#1F2937',
+                border: conversionMode === mode.id ? '1px solid #10B981' : '1px solid #374151',
+                borderRadius: '8px',
+                padding: '8px 14px',
+                color: conversionMode === mode.id ? '#34D399' : '#94A3B8',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Primary Action Workflow Bar */}
       <div className="pipeline-bar">
         <button
           className="btn-primary"
@@ -200,20 +264,32 @@ export const App: React.FC = () => {
           style={{ background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)' }}
         >
           {analyzing ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
-          {analyzing ? 'Analyzing Document & Template...' : 'Analyze Source & Destination'}
+          {analyzing ? 'Analyzing Source & Destination...' : 'Analyze Project & Template'}
         </button>
 
-        {sourceUdm && destSpec && (
-          <button
-            className="btn-primary"
-            onClick={handleConvert}
-            disabled={converting}
-          >
-            {converting ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />}
-            {converting ? 'Compiling & Converting...' : 'Convert Document'}
-          </button>
-        )}
+        <ArrowRight size={24} color="#6366F1" style={{ alignSelf: 'center' }} />
+
+        <button
+          className="btn-primary"
+          onClick={handleConvert}
+          disabled={converting || !sourceUdm || !destSpec}
+        >
+          {converting ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />}
+          {converting ? 'Converting Manuscript...' : 'Convert Document'}
+        </button>
       </div>
+
+      {/* Progress Stepper Display */}
+      {converting && (
+        <div style={{ background: '#0B0F19', border: '1px solid #6366F1', borderRadius: '12px', padding: '20px', marginBottom: '32px', textAlign: 'center' }}>
+          <div style={{ fontSize: '1rem', fontWeight: 600, color: '#A5B4FC', marginBottom: '8px' }}>
+            {PROGRESS_STEPS[progressStep]}
+          </div>
+          <div className="confidence-gauge">
+            <div className="confidence-fill" style={{ width: `${((progressStep + 1) / PROGRESS_STEPS.length) * 100}%` }}></div>
+          </div>
+        </div>
+      )}
 
       {/* Analysis View */}
       {sourceUdm && destSpec && (
@@ -229,6 +305,23 @@ export const App: React.FC = () => {
         <ReportView
           report={report}
           onOpenPdfModal={() => setShowPdfModal(true)}
+        />
+      )}
+
+      {/* Structure Modals */}
+      {activeStructureModal === 'source' && (
+        <StructureModal
+          title="Source Manuscript"
+          fileTree={sourceTree}
+          onClose={() => setActiveStructureModal(null)}
+        />
+      )}
+      {activeStructureModal === 'dest' && (
+        <StructureModal
+          title="Destination Template"
+          fileTree={destTree}
+          detectedRules={destSpec?.detected_rules}
+          onClose={() => setActiveStructureModal(null)}
         />
       )}
 

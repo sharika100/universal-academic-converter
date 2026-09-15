@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { FileText, Upload, FolderArchive, CheckCircle, FileCode, ChevronRight } from 'lucide-react';
+import { FileText, Upload, FolderArchive, CheckCircle, FileCode, ChevronRight, Eye } from 'lucide-react';
 
 interface FileTreeItem {
   path: string;
@@ -15,6 +15,7 @@ interface SourcePanelProps {
   fileTree: FileTreeItem[];
   onFileUpload: (file: File) => void;
   analysisDone: boolean;
+  onViewStructure: () => void;
 }
 
 export const SourcePanel: React.FC<SourcePanelProps> = ({
@@ -23,7 +24,8 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
   file,
   fileTree,
   onFileUpload,
-  analysisDone
+  analysisDone,
+  onViewStructure
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -49,7 +51,7 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
       </div>
 
       <div className="format-selector">
-        {['DOCX', 'LaTeX', 'LaTeX Project ZIP'].map((fmt) => (
+        {['LaTeX Project ZIP', 'DOCX', 'LaTeX'].map((fmt) => (
           <button
             key={fmt}
             className={`format-btn ${format === fmt ? 'active' : ''}`}
@@ -81,32 +83,39 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
       >
         <Upload className="dropzone-icon" />
         <div className="dropzone-title">
-          {file ? file.name : `Drag & Drop Source ${format}`}
+          {file ? file.name : `Upload Source ${format}`}
         </div>
         <div className="dropzone-sub">
-          {file ? `${(file.size / 1024).toFixed(1)} KB — Click to change` : 'or Browse Files'}
+          {file ? `${(file.size / 1024).toFixed(1)} KB — Click to replace` : 'Drag & Drop .zip or Browse Files'}
         </div>
       </div>
 
-      {fileTree.length > 0 && (
-        <div className="file-tree-container">
-          <div className="file-tree-header">
-            <span>EXTRACTED SOURCE STRUCTURE</span>
-            <span>{fileTree.length} items</span>
+      {file && fileTree.length > 0 && (
+        <div style={{ marginTop: '16px', background: '#0B0F19', border: '1px solid #1E293B', borderRadius: '10px', padding: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#34D399', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <CheckCircle size={14} /> Source Project Uploaded ({fileTree.length} items)
+            </span>
+            <button
+              onClick={(e) => { e.stopPropagation(); onViewStructure(); }}
+              style={{ background: '#1F2937', border: '1px solid #374151', borderRadius: '6px', color: '#A5B4FC', fontSize: '0.775rem', padding: '4px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+            >
+              <Eye size={12} /> View Project Structure
+            </button>
           </div>
-          {fileTree.map((item, idx) => (
-            <div key={idx} className="file-tree-item">
-              <ChevronRight size={12} color="#6366F1" />
-              <CheckCircle size={13} color="#10B981" />
-              <span>{item.path}</span>
-            </div>
-          ))}
+
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.775rem', color: '#CBD5E1', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            {fileTree.slice(0, 5).map((item, idx) => (
+              <span key={idx} style={{ background: '#111827', padding: '2px 8px', borderRadius: '4px', border: '1px solid #1F2937' }}>
+                ✓ {item.name}
+              </span>
+            ))}
+            {fileTree.length > 5 && (
+              <span style={{ color: '#64748B', fontSize: '0.75rem', alignSelf: 'center' }}>+{fileTree.length - 5} more</span>
+            )}
+          </div>
         </div>
       )}
-
-      <div style={{ marginTop: '16px', fontSize: '0.825rem', color: '#64748B' }}>
-        <strong>Source Template (Optional):</strong> Select if manuscript uses custom <code>.cls</code> or <code>.sty</code> package.
-      </div>
     </div>
   );
 };

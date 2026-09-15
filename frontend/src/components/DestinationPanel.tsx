@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { LayoutTemplate, Upload, FolderArchive, CheckCircle, FileCode, ChevronRight } from 'lucide-react';
+import { LayoutTemplate, Upload, FolderArchive, CheckCircle, FileCode, ChevronRight, Eye } from 'lucide-react';
 
 interface FileTreeItem {
   path: string;
@@ -15,6 +15,7 @@ interface DestinationPanelProps {
   fileTree: FileTreeItem[];
   onFileUpload: (file: File) => void;
   analysisDone: boolean;
+  onViewStructure: () => void;
 }
 
 export const DestinationPanel: React.FC<DestinationPanelProps> = ({
@@ -23,7 +24,8 @@ export const DestinationPanel: React.FC<DestinationPanelProps> = ({
   file,
   fileTree,
   onFileUpload,
-  analysisDone
+  analysisDone,
+  onViewStructure
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -49,11 +51,11 @@ export const DestinationPanel: React.FC<DestinationPanelProps> = ({
       </div>
 
       <div className="format-selector">
-        {['DOCX', 'LaTeX', 'LaTeX Project ZIP'].map((fmt) => (
+        {['LaTeX Template ZIP', 'DOCX Template', 'LaTeX Template'].map((fmt) => (
           <button
             key={fmt}
-            className={`format-btn ${format === fmt ? 'active' : ''}`}
-            onClick={() => setFormat(fmt)}
+            className={`format-btn ${format.includes('ZIP') && fmt.includes('ZIP') ? 'active' : (format === fmt ? 'active' : '')}`}
+            onClick={() => setFormat(fmt.includes('ZIP') ? 'LaTeX Project ZIP' : (fmt.includes('DOCX') ? 'DOCX' : 'LaTeX'))}
           >
             {fmt.includes('ZIP') ? <FolderArchive size={15} /> : <FileCode size={15} />}
             {fmt}
@@ -70,7 +72,7 @@ export const DestinationPanel: React.FC<DestinationPanelProps> = ({
             onFileUpload(e.target.files[0]);
           }
         }}
-        accept={format === 'LaTeX Project ZIP' ? '.zip' : (format === 'DOCX' ? '.docx' : '.tex,.cls,.zip')}
+        accept={format.includes('ZIP') ? '.zip' : (format.includes('DOCX') ? '.docx' : '.tex,.cls,.zip')}
       />
 
       <div
@@ -84,29 +86,36 @@ export const DestinationPanel: React.FC<DestinationPanelProps> = ({
           {file ? file.name : `Upload Destination Template (${format})`}
         </div>
         <div className="dropzone-sub">
-          {file ? `${(file.size / 1024).toFixed(1)} KB — Click to change` : 'Accepts complete template ZIP packages (.cls, .sty, .bst, sample.tex)'}
+          {file ? `${(file.size / 1024).toFixed(1)} KB — Click to replace` : 'Accepts complete template ZIP packages (.cls, .sty, .bst, sample.tex)'}
         </div>
       </div>
 
-      {fileTree.length > 0 && (
-        <div className="file-tree-container">
-          <div className="file-tree-header">
-            <span>TARGET TEMPLATE INFRASTRUCTURE</span>
-            <span>{fileTree.length} items</span>
+      {file && fileTree.length > 0 && (
+        <div style={{ marginTop: '16px', background: '#0B0F19', border: '1px solid #1E293B', borderRadius: '10px', padding: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#34D399', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <CheckCircle size={14} /> Destination Template Uploaded ({fileTree.length} items)
+            </span>
+            <button
+              onClick={(e) => { e.stopPropagation(); onViewStructure(); }}
+              style={{ background: '#1F2937', border: '1px solid #374151', borderRadius: '6px', color: '#A5B4FC', fontSize: '0.775rem', padding: '4px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+            >
+              <Eye size={12} /> View Template Structure
+            </button>
           </div>
-          {fileTree.map((item, idx) => (
-            <div key={idx} className="file-tree-item">
-              <ChevronRight size={12} color="#10B981" />
-              <CheckCircle size={13} color="#34D399" />
-              <span>{item.path}</span>
-            </div>
-          ))}
+
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.775rem', color: '#CBD5E1', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            {fileTree.slice(0, 5).map((item, idx) => (
+              <span key={idx} style={{ background: '#111827', padding: '2px 8px', borderRadius: '4px', border: '1px solid #1F2937' }}>
+                ✓ {item.name}
+              </span>
+            ))}
+            {fileTree.length > 5 && (
+              <span style={{ color: '#64748B', fontSize: '0.75rem', alignSelf: 'center' }}>+{fileTree.length - 5} more</span>
+            )}
+          </div>
         </div>
       )}
-
-      <div style={{ marginTop: '16px', fontSize: '0.825rem', color: '#64748B' }}>
-        <strong>Optional Guidelines:</strong> Upload PDF/DOCX author guidelines or sample paper for target rule extraction.
-      </div>
     </div>
   );
 };

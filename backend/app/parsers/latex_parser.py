@@ -2,7 +2,6 @@ import os
 import re
 import base64
 from typing import List, Dict, Any, Tuple, Optional
-from pylatexenc.latexwalker import LatexWalker, LatexEnvironmentNode, LatexMacroNode, LatexCharsNode
 
 from app.models.udm import (
     UniversalDocumentModel, Metadata, Author, Affiliation,
@@ -31,11 +30,22 @@ class LatexParser:
         bib_references = LatexParser._parse_bib_files(project_dir, full_content)
         udm.references = bib_references
         
-        # 3. Parse Sections, Paragraphs, Equations, Figures, Tables
+        # 3. Extract Acknowledgements & Appendices
+        ack_m = re.search(r'\\begin\{acknowledgements?\}(.*?)\\end\{acknowledgements?\}', full_content, re.DOTALL | re.I)
+        if ack_m:
+            udm.acknowledgements = ack_m.group(1).strip()
+            
+        # 4. Parse Sections, Paragraphs, Equations, Figures, Tables
         sections, parsed_warnings = LatexParser._parse_body(full_content, project_dir)
         udm.sections = sections
         udm.warnings.extend(parsed_warnings)
         
+        # 5. Extract Custom Packages & Commands
+        packages = re.findall(r'\\usepackage(?:\[[^\]]*\])?\{([^}]+)\}', full_content)
+        custom_cmds = re.findall(r'\\(?:newcommand|def)\{\\([a-zA-Z]+)\}', full_content)
+        if custom_cmds:
+            udm.warnings.append(f"Custom commands detected: \\{', \\'.join(custom_cmds[:4])}")
+            
         # Calculate parsing confidence
         confidence = 96.0
         if not udm.metadata.title or udm.metadata.title == "Untitled Document":
@@ -78,12 +88,11 @@ class LatexParser:
         title_match = re.search(r'\\title(?:\[[^\]]*\])?\{([^}]+)\}', content, re.DOTALL)
         if title_match:
             raw_t = title_match.group(1).strip()
-            # Clean LaTeX commands from title string
             clean_t = re.sub(r'\\[a-zA-Z]+\{([^}]+)\}', r'\1', raw_t)
             clean_t = re.sub(r'\\[a-zA-Z]+', '', clean_t).strip()
             metadata.title = clean_t
             
-        # Authors & Affiliations (IEEE, Springer, Elsevier, Standard formats)
+        # Authors & Affiliations (IEEE, Springer, Elsevier, ACM, Standard formats)
         authors = []
         affiliations = []
         
@@ -100,7 +109,6 @@ class LatexParser:
             # Springer / standard format (\author{Name}, \institute{Affil})
             author_matches = re.findall(r'\\author(?:\[[^\]]*\])?\{([^}]+)\}', content)
             for a_str in author_matches:
-                # Remove \fnm, \sur, \email, \and
                 clean_name = re.sub(r'\\(?:fnm|sur|email|orcid)\{([^}]+)\}', r'\1', a_str)
                 clean_name = re.sub(r'\\[a-zA-Z]+', '', clean_name).strip()
                 if clean_name and len(clean_name) < 80:
@@ -130,7 +138,6 @@ class LatexParser:
     @staticmethod
     def _parse_bib_files(base_dir: str, content: str) -> List[Reference]:
         references = []
-        bib_files = re.findall(r'\\bibliography\{([^}]+)\}', content)
         
         # Find all .bib files in base_dir
         found_bib_paths = []
@@ -189,14 +196,6 @@ class LatexParser:
         # Split content by \section
         raw_sections = re.split(r'\\section\*?\{([^}]+)\}', content)
         
-        # Lead text before first section
-        intro_text = raw_sections[0]
-        
-        # Check custom environments/commands
-        custom_cmds = re.findall(r'\\(?:newcommand|def)\{\\([a-zA-Z]+)\}', content)
-        if custom_cmds:
-            warnings.append(f"Custom LaTeX commands detected: \\{', \\'.join(custom_cmds[:3])}")
-            
         for i in range(1, len(raw_sections), 2):
             sec_title = raw_sections[i].strip()
             sec_body = raw_sections[i+1] if i+1 < len(raw_sections) else ""
@@ -228,7 +227,6 @@ class LatexParser:
                     caption = cap_match.group(1).strip() if cap_match else ""
                     label = lbl_match.group(1).strip() if lbl_match else None
                     
-                    # Try to locate actual image file in base_dir
                     b64_str = LatexParser._load_image_b64(base_dir, img_path)
                     
                     fig_id = f"fig_{len(section_obj.blocks)+1}"
@@ -248,7 +246,6 @@ class LatexParser:
                     lbl_match = re.search(r'\\label\{([^}]+)\}', tbl_str)
                     caption = cap_match.group(1).strip() if cap_match else ""
                     
-                    # Parse tabular environment
                     tab_match = re.search(r'\\begin\{tabular\}\{([^}]+)\}(.*?)\\end\{tabular\}', tbl_str, re.DOTALL)
                     rows = []
                     headers = []

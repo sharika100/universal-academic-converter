@@ -59,7 +59,7 @@ class Figure(BaseModel):
     label: Optional[str] = None
     image_filename: str = ""
     image_data_b64: Optional[str] = None
-    width_hint: Optional[str] = "1.0\\textwidth"
+    width_hint: Optional[str] = "0.8\\linewidth"
     original_path: Optional[str] = None
 
 class TableCell(BaseModel):
@@ -82,7 +82,7 @@ class Section(BaseModel):
     title: str
     level: int = 1
     label: Optional[str] = None
-    blocks: List[Dict[str, Any]] = Field(default_factory=list) # Dict versions of Paragraph, ListBlock, Equation, Figure, Table
+    blocks: List[Dict[str, Any]] = Field(default_factory=list)
 
 class Reference(BaseModel):
     id: str
@@ -107,6 +107,8 @@ class UniversalDocumentModel(BaseModel):
     acknowledgements: Optional[str] = None
     appendices: List[Section] = Field(default_factory=list)
     references: List[Reference] = Field(default_factory=list)
-    parsing_confidence: float = 95.0
+    cross_references: Dict[str, str] = Field(default_factory=dict)
+    conversion_mode: str = "FORMAT_ONLY" # "FORMAT_ONLY", "FORMAT_STRUCTURAL_FIX", "FORMAT_SUBMISSION_CHECK"
+    parsing_confidence: float = 96.0
     warnings: List[str] = Field(default_factory=list)
     source_format: str = "unknown"
