@@ -93,6 +93,7 @@ INLINE_INDEX_HTML = """<!doctype html>
   </body>
 </html>"""
 
+@app.get("")
 @app.get("/")
 @app.get("/backend/app/main.py")
 @app.get("/backend/app/main.py/")
