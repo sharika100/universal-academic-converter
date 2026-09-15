@@ -11,9 +11,11 @@ from app.parsers.zip_utils import find_latex_entrypoint
 
 class LatexParser:
     @staticmethod
-    def parse_project(project_dir: str) -> UniversalDocumentModel:
+    def parse_project(project_dir: str, selected_entrypoint: Optional[str] = None) -> UniversalDocumentModel:
         """Parses a full LaTeX project directory into a UniversalDocumentModel."""
-        entrypoint_rel, all_tex = find_latex_entrypoint(project_dir)
+        primary_rel, candidates, all_tex = find_latex_entrypoint(project_dir)
+        
+        entrypoint_rel = selected_entrypoint or primary_rel
         if not entrypoint_rel:
             raise ValueError("No valid .tex entrypoint containing \\documentclass found in project.")
             

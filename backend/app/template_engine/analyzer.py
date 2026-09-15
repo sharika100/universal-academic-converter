@@ -59,7 +59,7 @@ class TemplateAnalyzer:
         rules.append(f"Detected {len(required_files)} target template infrastructure files (.cls, .sty, .bst, assets)")
         
         # 2. Find primary sample entry point .tex
-        entrypoint_rel, _ = find_latex_entrypoint(project_dir)
+        entrypoint_rel, candidates, _ = find_latex_entrypoint(project_dir)
         if entrypoint_rel:
             spec.entry_point_file = entrypoint_rel
             main_p = os.path.join(project_dir, entrypoint_rel)

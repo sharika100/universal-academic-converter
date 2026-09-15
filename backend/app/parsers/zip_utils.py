@@ -33,13 +33,14 @@ def build_directory_tree(base_dir: str) -> List[Dict[str, Any]]:
             
     return tree
 
-def find_latex_entrypoint(base_dir: str) -> Tuple[Optional[str], List[str]]:
+def find_latex_entrypoint(base_dir: str) -> Tuple[Optional[str], List[str], List[str]]:
     """
-    Finds main entrypoint .tex file containing \documentclass in base_dir.
-    Returns (entrypoint_rel_path, list_of_all_tex_files).
+    Finds main entrypoint .tex file containing \\documentclass in base_dir.
+    Returns (primary_entrypoint, list_of_candidate_entrypoints, list_of_all_tex_files).
     """
     all_tex = []
-    entrypoint = None
+    candidates = []
+    primary = None
     
     for root, _, files in os.walk(base_dir):
         for f in files:
@@ -52,12 +53,15 @@ def find_latex_entrypoint(base_dir: str) -> Tuple[Optional[str], List[str]]:
                     with open(full_path, "r", encoding="utf-8", errors="ignore") as fh:
                         content = fh.read()
                         if r"\documentclass" in content:
-                            if f.lower() in ["main.tex", "paper.tex", "sample.tex", "bare_conf.tex"] or entrypoint is None:
-                                entrypoint = rel_path
+                            candidates.append(rel_path)
+                            if f.lower() in ["main.tex", "paper.tex", "manuscript.tex", "bare_conf.tex"] or primary is None:
+                                primary = rel_path
                 except Exception:
                     pass
                 
-    if not entrypoint and all_tex:
-        entrypoint = all_tex[0]
+    if not primary and candidates:
+        primary = candidates[0]
+    elif not primary and all_tex:
+        primary = all_tex[0]
         
-    return entrypoint, all_tex
+    return primary, candidates, all_tex

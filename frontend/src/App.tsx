@@ -7,6 +7,7 @@ import { AnalysisView } from './components/AnalysisView';
 import { ReportView } from './components/ReportView';
 import { PdfPreviewModal } from './components/PdfPreviewModal';
 import { StructureModal } from './components/StructureModal';
+import { EntrypointSelectModal } from './components/EntrypointSelectModal';
 import { Footer } from './components/Footer';
 import { Play, Search, Loader2, ArrowRight, ShieldCheck } from 'lucide-react';
 
@@ -50,6 +51,10 @@ export const App: React.FC = () => {
   const [showPdfModal, setShowPdfModal] = useState<boolean>(false);
   const [activeStructureModal, setActiveStructureModal] = useState<'source' | 'dest' | null>(null);
 
+  const [possibleEntrypoints, setPossibleEntrypoints] = useState<string[]>([]);
+  const [selectedEntrypoint, setSelectedEntrypoint] = useState<string>('');
+  const [showEntrypointModal, setShowEntrypointModal] = useState<boolean>(false);
+
   useEffect(() => {
     fetch('/api/presets')
       .then((res) => res.json())
@@ -70,6 +75,8 @@ export const App: React.FC = () => {
     setDestSpec(null);
     setReport(null);
     setMapping(null);
+    setPossibleEntrypoints([]);
+    setSelectedEntrypoint('');
 
     try {
       const srcRes = await fetch(preset.source_file);
@@ -88,7 +95,7 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleAnalyze = async () => {
+  const handleAnalyze = async (overrideEntrypoint?: string) => {
     if (!sourceFile || !destFile) {
       alert("Please select both a Source manuscript file and a Destination template file.");
       return;
@@ -99,6 +106,10 @@ export const App: React.FC = () => {
       // 1. Analyze Source
       const srcData = new FormData();
       srcData.append('file', sourceFile);
+      if (overrideEntrypoint || selectedEntrypoint) {
+        srcData.append('selected_entrypoint', overrideEntrypoint || selectedEntrypoint);
+      }
+
       const srcRes = await fetch('/api/analyze-source', { method: 'POST', body: srcData });
       if (!srcRes.ok) {
         const errJson = await srcRes.json().catch(() => ({ detail: srcRes.statusText }));
@@ -110,6 +121,12 @@ export const App: React.FC = () => {
       setJobId(srcJson.job_id);
       setSourceTree(srcJson.file_tree || []);
       setSourceUdm(srcJson.udm);
+      if (srcJson.possible_entrypoints) {
+        setPossibleEntrypoints(srcJson.possible_entrypoints);
+        if (srcJson.possible_entrypoints.length > 1 && !overrideEntrypoint && !selectedEntrypoint) {
+          setShowEntrypointModal(true);
+        }
+      }
 
       // 2. Analyze Template
       const destData = new FormData();
@@ -259,7 +276,7 @@ export const App: React.FC = () => {
       <div className="pipeline-bar">
         <button
           className="btn-primary"
-          onClick={handleAnalyze}
+          onClick={() => handleAnalyze()}
           disabled={analyzing || !sourceFile || !destFile}
           style={{ background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)' }}
         >
@@ -330,6 +347,19 @@ export const App: React.FC = () => {
         <PdfPreviewModal
           jobId={jobId}
           onClose={() => setShowPdfModal(false)}
+        />
+      )}
+
+      {/* Entrypoint Selection Modal */}
+      {showEntrypointModal && (
+        <EntrypointSelectModal
+          candidates={possibleEntrypoints}
+          selectedEntrypoint={selectedEntrypoint}
+          onSelect={(choice) => {
+            setSelectedEntrypoint(choice);
+            handleAnalyze(choice);
+          }}
+          onClose={() => setShowEntrypointModal(false)}
         />
       )}
 

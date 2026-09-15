@@ -77,7 +77,8 @@ def get_presets():
 
 @app.post("/api/analyze-source")
 async def analyze_source(
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    selected_entrypoint: Optional[str] = Form(None)
 ):
     job_id = str(uuid.uuid4())
     job_dir = os.path.join(TEMP_STORAGE, job_id, "source")
@@ -91,6 +92,7 @@ async def analyze_source(
         
     tree = []
     warnings = []
+    candidates = []
     
     try:
         if clean_filename.endswith(".zip"):
@@ -98,7 +100,8 @@ async def analyze_source(
             rel_files, zip_warns = ZipGuard.inspect_and_extract_safe(file_path, extract_dir)
             warnings.extend(zip_warns)
             tree = build_directory_tree(extract_dir)
-            udm = LatexParser.parse_project(extract_dir)
+            _, candidates, _ = find_latex_entrypoint(extract_dir)
+            udm = LatexParser.parse_project(extract_dir, selected_entrypoint=selected_entrypoint)
         elif clean_filename.endswith(".docx"):
             tree = [{"path": clean_filename, "name": clean_filename, "type": "docx", "size": os.path.getsize(file_path)}]
             udm = DocxParser.parse(file_path)
@@ -122,6 +125,8 @@ async def analyze_source(
         "format": udm.source_format,
         "confidence": udm.parsing_confidence,
         "file_tree": tree,
+        "possible_entrypoints": candidates,
+        "selected_entrypoint": selected_entrypoint or (candidates[0] if candidates else None),
         "udm": udm.model_dump()
     }
 
