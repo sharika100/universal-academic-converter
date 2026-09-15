@@ -29,6 +29,18 @@ from app.compilation.latex_sandbox import LatexSandbox
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("UniversalConverter")
 
+import starlette.formparsers
+from starlette.requests import Request
+
+MAX_PART_SIZE = 50 * 1024 * 1024  # 50 MB max per part / form field
+
+if hasattr(starlette.formparsers.MultiPartParser.__init__, "__kwdefaults__") and starlette.formparsers.MultiPartParser.__init__.__kwdefaults__:
+    starlette.formparsers.MultiPartParser.__init__.__kwdefaults__["max_part_size"] = MAX_PART_SIZE
+if hasattr(Request.form, "__kwdefaults__") and Request.form.__kwdefaults__:
+    Request.form.__kwdefaults__["max_part_size"] = MAX_PART_SIZE
+if hasattr(Request._get_form, "__kwdefaults__") and Request._get_form.__kwdefaults__:
+    Request._get_form.__kwdefaults__["max_part_size"] = MAX_PART_SIZE
+
 app = FastAPI(title="Universal Academic Format Converter API")
 
 app.add_middleware(
@@ -38,6 +50,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def handle_multipart_limits(request: Request, call_next):
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" in content_type:
+        try:
+            await request._get_form(max_part_size=MAX_PART_SIZE)
+        except Exception as exc:
+            return JSONResponse(
+                status_code=400,
+                content=create_error_payload(
+                    stage="request_validation",
+                    error_code="PAYLOAD_TOO_LARGE",
+                    message="Uploaded manuscript, template, or form field exceeded maximum size limit (50 MB).",
+                    detail=str(exc),
+                    ref_id=f"REF-{uuid.uuid4().hex[:8].upper()}"
+                )
+            )
+    return await call_next(request)
 
 @app.middleware("http")
 async def normalize_vercel_path(request, call_next):
