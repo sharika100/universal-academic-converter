@@ -49,7 +49,12 @@ if not os.path.exists(SAMPLES_DIR):
 if not os.path.exists(SAMPLES_DIR):
     SAMPLES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "samples"))
 
-DIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist"))
+STATIC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "static"))
+if not os.path.exists(STATIC_DIR):
+    STATIC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist"))
+
+if os.path.exists(STATIC_DIR) and os.path.exists(os.path.join(STATIC_DIR, "assets")):
+    app.mount("/assets", StaticFiles(directory=os.path.join(STATIC_DIR, "assets")), name="assets")
 
 # Serve samples static directory
 if os.path.exists(SAMPLES_DIR):
@@ -57,7 +62,7 @@ if os.path.exists(SAMPLES_DIR):
 
 @app.get("/")
 def root_endpoint():
-    index_file = os.path.join(DIST_DIR, "index.html")
+    index_file = os.path.join(STATIC_DIR, "index.html")
     if os.path.exists(index_file):
         return FileResponse(index_file)
     return {
@@ -456,12 +461,15 @@ def download_file(job_id: str, file_kind: str):
     raise HTTPException(status_code=404, detail="Requested download file not found.")
 
 # Mount built frontend dist static files if present
-if os.path.exists(DIST_DIR):
-    app.mount("/assets", StaticFiles(directory=os.path.join(DIST_DIR, "assets")), name="assets")
-
+if os.path.exists(STATIC_DIR):
     @app.get("/{catchall:path}")
     def serve_frontend(catchall: str):
-        file_path = os.path.join(DIST_DIR, catchall)
+        if catchall.startswith("health") or catchall.startswith("api/health"):
+            return health_check()
+        file_path = os.path.join(STATIC_DIR, catchall)
         if os.path.exists(file_path) and os.path.isfile(file_path):
             return FileResponse(file_path)
-        return FileResponse(os.path.join(DIST_DIR, "index.html"))
+        index_file = os.path.join(STATIC_DIR, "index.html")
+        if os.path.exists(index_file):
+            return FileResponse(index_file)
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
