@@ -8,6 +8,8 @@ import { ReportView } from './components/ReportView';
 import { PdfPreviewModal } from './components/PdfPreviewModal';
 import { StructureModal } from './components/StructureModal';
 import { EntrypointSelectModal } from './components/EntrypointSelectModal';
+import { ErrorPanel, APIErrorState } from './components/ErrorPanel';
+import { DebugPanel } from './components/DebugPanel';
 import { Footer } from './components/Footer';
 import { Play, Search, Loader2, ArrowRight, ShieldCheck } from 'lucide-react';
 
@@ -55,6 +57,10 @@ export const App: React.FC = () => {
   const [selectedEntrypoint, setSelectedEntrypoint] = useState<string>('');
   const [showEntrypointModal, setShowEntrypointModal] = useState<boolean>(false);
 
+  const [apiError, setApiError] = useState<APIErrorState | null>(null);
+  const [activeEndpoint, setActiveEndpoint] = useState<string>('/api/analyze-source');
+  const [httpStatus, setHttpStatus] = useState<number | null>(200);
+
   useEffect(() => {
     const loadPresets = async () => {
       try {
@@ -86,6 +92,7 @@ export const App: React.FC = () => {
     setMapping(null);
     setPossibleEntrypoints([]);
     setSelectedEntrypoint('');
+    setApiError(null);
 
     try {
       const srcRes = await fetch(preset.source_file);
@@ -104,15 +111,33 @@ export const App: React.FC = () => {
     }
   };
 
+  const getAnalyzeButtonText = () => {
+    if (sourceFormat.toLowerCase().includes('docx')) {
+      return "Analyze Source & Destination";
+    } else if (sourceFormat.toLowerCase().includes('zip')) {
+      return "Analyze Source Project & Destination Template";
+    }
+    return "Analyze Source & Destination";
+  };
+
   const handleAnalyze = async (overrideEntrypoint?: string) => {
     if (!sourceFile || !destFile) {
-      alert("Please select both a Source manuscript file and a Destination template file.");
+      setApiError({
+        stage: 'source_analysis',
+        error_code: 'MISSING_FILE',
+        message: 'Please select both a Source manuscript file and a Destination template file.',
+        reference_id: 'REF-MISSING-INPUT',
+        detail: 'Both source and destination files are required for document analysis.'
+      });
       return;
     }
 
     setAnalyzing(true);
+    setApiError(null);
+
     try {
       // 1. Analyze Source
+      setActiveEndpoint('/api/analyze-source');
       const srcData = new FormData();
       srcData.append('file', sourceFile);
       if (overrideEntrypoint || selectedEntrypoint) {
@@ -121,18 +146,32 @@ export const App: React.FC = () => {
 
       let srcRes = await fetch('/api/analyze-source', { method: 'POST', body: srcData }).catch(() => null);
       if (!srcRes || !srcRes.ok) {
+        setActiveEndpoint('/analyze-source');
         srcRes = await fetch('/analyze-source', { method: 'POST', body: srcData });
       }
+
+      setHttpStatus(srcRes.status);
       if (!srcRes.ok) {
-        let detail = srcRes.statusText;
+        let errorData: any = null;
         try {
-          const errJson = await srcRes.json();
-          detail = errJson.detail || errJson.message || srcRes.statusText;
+          errorData = await srcRes.json();
         } catch {
           const text = await srcRes.text().catch(() => '');
-          if (text) detail = text.slice(0, 150);
+          errorData = {
+            stage: 'source_analysis',
+            error_code: 'DOCX_PARSE_ERROR',
+            message: `Server returned HTTP ${srcRes.status} error during source analysis.`,
+            detail: text.slice(0, 150) || srcRes.statusText,
+            reference_id: `REF-SRC-${Date.now().toString(36).toUpperCase()}`
+          };
         }
-        alert(`Source Analysis Error (${srcRes.status}): ${detail}`);
+        setApiError({
+          stage: errorData.stage || 'source_analysis',
+          error_code: errorData.error_code || 'DOCX_PARSE_ERROR',
+          message: errorData.message || 'Unable to analyze uploaded manuscript file.',
+          detail: errorData.detail || srcRes.statusText,
+          reference_id: errorData.reference_id || `REF-SRC-${Date.now().toString(36).toUpperCase()}`
+        });
         return;
       }
       const srcJson = await srcRes.json();
@@ -148,24 +187,39 @@ export const App: React.FC = () => {
       }
 
       // 2. Analyze Template
+      setActiveEndpoint('/api/analyze-template');
       const destData = new FormData();
       destData.append('file', destFile);
       destData.append('job_id', srcJson.job_id);
 
       let destRes = await fetch('/api/analyze-template', { method: 'POST', body: destData }).catch(() => null);
       if (!destRes || !destRes.ok) {
+        setActiveEndpoint('/analyze-template');
         destRes = await fetch('/analyze-template', { method: 'POST', body: destData });
       }
+
+      setHttpStatus(destRes.status);
       if (!destRes.ok) {
-        let detail = destRes.statusText;
+        let errorData: any = null;
         try {
-          const errJson = await destRes.json();
-          detail = errJson.detail || errJson.message || destRes.statusText;
+          errorData = await destRes.json();
         } catch {
           const text = await destRes.text().catch(() => '');
-          if (text) detail = text.slice(0, 150);
+          errorData = {
+            stage: 'template_analysis',
+            error_code: 'TEMPLATE_ANALYSIS_ERROR',
+            message: `Server returned HTTP ${destRes.status} error during template analysis.`,
+            detail: text.slice(0, 150) || destRes.statusText,
+            reference_id: `REF-DEST-${Date.now().toString(36).toUpperCase()}`
+          };
         }
-        alert(`Destination Template Analysis Error (${destRes.status}): ${detail}`);
+        setApiError({
+          stage: errorData.stage || 'template_analysis',
+          error_code: errorData.error_code || 'TEMPLATE_ANALYSIS_ERROR',
+          message: errorData.message || 'Unable to analyze destination template file.',
+          detail: errorData.detail || destRes.statusText,
+          reference_id: errorData.reference_id || `REF-DEST-${Date.now().toString(36).toUpperCase()}`
+        });
         return;
       }
       const destJson = await destRes.json();
@@ -189,36 +243,61 @@ export const App: React.FC = () => {
         equations_source: 12,
         references_source: 42,
         warnings: [
-          ...srcJson.udm.warnings,
-          ...destJson.spec.warnings
+          ...(srcJson.udm?.warnings || []),
+          ...(destJson.spec?.warnings || [])
         ]
       });
-    } catch (err) {
-      alert("Error during document analysis: " + err);
+    } catch (err: any) {
+      setApiError({
+        stage: 'source_analysis',
+        error_code: 'UNKNOWN_ERROR',
+        message: 'An unexpected client error occurred during analysis.',
+        detail: String(err),
+        reference_id: `REF-ERR-${Date.now().toString(36).toUpperCase()}`
+      });
     } finally {
       setAnalyzing(false);
     }
   };
 
   const handleConvert = async () => {
-    if (!jobId) return;
+    if (!jobId || !sourceUdm || !destSpec) {
+      setApiError({
+        stage: 'conversion',
+        error_code: 'MISSING_ANALYSIS',
+        message: 'Analysis must complete successfully for both Source and Destination before conversion.',
+        reference_id: 'REF-MISSING-ANALYSIS',
+        detail: 'Please run document and template analysis first.'
+      });
+      return;
+    }
 
     setConverting(true);
+    setApiError(null);
     setProgressStep(0);
 
-    // Animate progress steps
     const interval = setInterval(() => {
       setProgressStep((prev) => (prev < PROGRESS_STEPS.length - 1 ? prev + 1 : prev));
     }, 450);
 
     try {
+      setActiveEndpoint('/api/convert');
       const formData = new FormData();
       formData.append('job_id', jobId);
+      if (sourceUdm) {
+        formData.append('udm_json_str', JSON.stringify(sourceUdm));
+      }
+      if (destSpec) {
+        formData.append('spec_json_str', JSON.stringify(destSpec));
+      }
 
       let res = await fetch('/api/convert', { method: 'POST', body: formData }).catch(() => null);
       if (!res || !res.ok) {
+        setActiveEndpoint('/convert');
         res = await fetch('/convert', { method: 'POST', body: formData });
       }
+
+      setHttpStatus(res.status);
       const json = await res.json();
 
       clearInterval(interval);
@@ -230,15 +309,29 @@ export const App: React.FC = () => {
           setMapping(json.mapping);
         }
       } else {
-        alert("Conversion error: " + (json.detail || 'Unknown failure'));
+        setApiError({
+          stage: json.stage || 'conversion',
+          error_code: json.error_code || 'COMPILATION_ERROR',
+          message: json.message || 'Conversion error occurred during rendering.',
+          detail: json.detail || 'Unknown failure detail',
+          reference_id: json.reference_id || `REF-CONV-${Date.now().toString(36).toUpperCase()}`
+        });
       }
-    } catch (err) {
+    } catch (err: any) {
       clearInterval(interval);
-      alert("Error executing compiler conversion: " + err);
+      setApiError({
+        stage: 'conversion',
+        error_code: 'UNKNOWN_ERROR',
+        message: 'Error executing document conversion.',
+        detail: String(err),
+        reference_id: `REF-CONV-ERR-${Date.now().toString(36).toUpperCase()}`
+      });
     } finally {
       setConverting(false);
     }
   };
+
+  const isConvertEnabled = !!sourceUdm && !!destSpec && !apiError && !analyzing && !converting;
 
   return (
     <div className="app-container">
@@ -281,67 +374,129 @@ export const App: React.FC = () => {
 
         <div style={{ display: 'flex', gap: '12px' }}>
           {[
-            { id: 'FORMAT_ONLY', label: 'FORMAT ONLY (Default - 0 Content Rewrite)', desc: 'Safest mode. Preserves text 100% strictly.' },
-            { id: 'FORMAT_STRUCTURAL_FIX', label: 'FORMAT + STRUCTURAL FIX', desc: 'Fixes safe structural hierarchy.' },
-            { id: 'FORMAT_SUBMISSION_CHECK', label: 'FORMAT + SUBMISSION CHECK', desc: 'Converts and validates against target template.' }
+            { id: 'FORMAT_ONLY', label: 'FORMAT ONLY (Default)', desc: 'Safest Mode - 0 Content Rewriting' },
+            { id: 'STRUCTURAL_FIX', label: 'FORMAT + STRUCTURAL FIX', desc: 'Fixes section levels & captions' },
+            { id: 'SUBMISSION_CHECK', label: 'FORMAT + SUBMISSION CHECK', desc: 'Audits required elements' }
           ].map((mode) => (
             <button
               key={mode.id}
               onClick={() => setConversionMode(mode.id)}
               style={{
-                background: conversionMode === mode.id ? 'rgba(16, 185, 129, 0.15)' : '#1F2937',
-                border: conversionMode === mode.id ? '1px solid #10B981' : '1px solid #374151',
+                background: conversionMode === mode.id ? '#1E293B' : '#0F172A',
+                border: conversionMode === mode.id ? '1px solid #3B82F6' : '1px solid #334155',
+                color: conversionMode === mode.id ? '#60A5FA' : '#94A3B8',
                 borderRadius: '8px',
                 padding: '8px 14px',
-                color: conversionMode === mode.id ? '#34D399' : '#94A3B8',
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                cursor: 'pointer'
+                fontSize: '0.82rem',
+                cursor: 'pointer',
+                textAlign: 'left'
               }}
             >
-              {mode.label}
+              <div style={{ fontWeight: 600 }}>{mode.label}</div>
+              <div style={{ fontSize: '0.72rem', color: '#64748B' }}>{mode.desc}</div>
             </button>
           ))}
         </div>
       </div>
 
-      {/* Primary Action Workflow Bar */}
-      <div className="pipeline-bar">
+      {/* Structured Error Panel */}
+      {apiError && (
+        <ErrorPanel
+          error={apiError}
+          onDismiss={() => setApiError(null)}
+        />
+      )}
+
+      {/* Action Toolbar */}
+      <div style={{ display: 'flex', gap: '16px', marginBottom: '32px', flexWrap: 'wrap' }}>
         <button
-          className="btn-primary"
           onClick={() => handleAnalyze()}
           disabled={analyzing || !sourceFile || !destFile}
-          style={{ background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)' }}
+          style={{
+            flex: 1,
+            background: analyzing ? '#1E293B' : 'linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)',
+            color: '#FFFFFF',
+            border: 'none',
+            borderRadius: '10px',
+            padding: '14px 24px',
+            fontSize: '1rem',
+            fontWeight: 600,
+            cursor: (analyzing || !sourceFile || !destFile) ? 'not-allowed' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '10px',
+            boxShadow: '0 4px 14px rgba(37, 99, 235, 0.3)'
+          }}
         >
-          {analyzing ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
-          {analyzing ? 'Analyzing Source & Destination...' : 'Analyze Project & Template'}
+          {analyzing ? (
+            <>
+              <Loader2 className="animate-spin" size={20} />
+              Analyzing Document & Template...
+            </>
+          ) : (
+            <>
+              <Search size={20} />
+              {getAnalyzeButtonText()}
+            </>
+          )}
         </button>
 
-        <ArrowRight size={24} color="#6366F1" style={{ alignSelf: 'center' }} />
-
         <button
-          className="btn-primary"
           onClick={handleConvert}
-          disabled={converting || !sourceUdm || !destSpec}
+          disabled={!isConvertEnabled}
+          style={{
+            flex: 1,
+            background: !isConvertEnabled ? '#1E293B' : 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+            color: !isConvertEnabled ? '#64748B' : '#FFFFFF',
+            border: 'none',
+            borderRadius: '10px',
+            padding: '14px 24px',
+            fontSize: '1rem',
+            fontWeight: 600,
+            cursor: !isConvertEnabled ? 'not-allowed' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '10px',
+            boxShadow: !isConvertEnabled ? 'none' : '0 4px 14px rgba(5, 150, 105, 0.3)'
+          }}
         >
-          {converting ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />}
-          {converting ? 'Converting Manuscript...' : 'Convert Document'}
+          {converting ? (
+            <>
+              <Loader2 className="animate-spin" size={20} />
+              Executing Compiler Conversion...
+            </>
+          ) : (
+            <>
+              <Play size={20} />
+              Convert Document to Target Format
+            </>
+          )}
         </button>
       </div>
 
-      {/* Progress Stepper Display */}
-      {converting && (
-        <div style={{ background: '#0B0F19', border: '1px solid #6366F1', borderRadius: '12px', padding: '20px', marginBottom: '32px', textAlign: 'center' }}>
-          <div style={{ fontSize: '1rem', fontWeight: 600, color: '#A5B4FC', marginBottom: '8px' }}>
-            {PROGRESS_STEPS[progressStep]}
+      {/* Progress Bar Stepper */}
+      {(analyzing || converting) && (
+        <div style={{ background: '#111827', border: '1px solid #1F2937', borderRadius: '12px', padding: '20px', marginBottom: '32px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', fontSize: '0.9rem', color: '#F8FAFC', fontWeight: 600 }}>
+            <span>{converting ? PROGRESS_STEPS[progressStep] : "Analyzing manuscript & destination template syntax..."}</span>
+            <span>{converting ? `${Math.round(((progressStep + 1) / PROGRESS_STEPS.length) * 100)}%` : "Processing..."}</span>
           </div>
-          <div className="confidence-gauge">
-            <div className="confidence-fill" style={{ width: `${((progressStep + 1) / PROGRESS_STEPS.length) * 100}%` }}></div>
+          <div style={{ width: '100%', height: '8px', background: '#1E293B', borderRadius: '4px', overflow: 'hidden' }}>
+            <div
+              style={{
+                height: '100%',
+                width: converting ? `${((progressStep + 1) / PROGRESS_STEPS.length) * 100}%` : '60%',
+                background: 'linear-gradient(90deg, #3B82F6 0%, #10B981 100%)',
+                transition: 'width 0.4s ease'
+              }}
+            />
           </div>
         </div>
       )}
 
-      {/* Analysis View */}
+      {/* Analysis Results View */}
       {sourceUdm && destSpec && (
         <AnalysisView
           sourceUdm={sourceUdm}
@@ -350,7 +505,7 @@ export const App: React.FC = () => {
         />
       )}
 
-      {/* Final Report & Download View */}
+      {/* Conversion Report & Download Page View */}
       {report && (
         <ReportView
           report={report}
@@ -358,24 +513,7 @@ export const App: React.FC = () => {
         />
       )}
 
-      {/* Structure Modals */}
-      {activeStructureModal === 'source' && (
-        <StructureModal
-          title="Source Manuscript"
-          fileTree={sourceTree}
-          onClose={() => setActiveStructureModal(null)}
-        />
-      )}
-      {activeStructureModal === 'dest' && (
-        <StructureModal
-          title="Destination Template"
-          fileTree={destTree}
-          detectedRules={destSpec?.detected_rules}
-          onClose={() => setActiveStructureModal(null)}
-        />
-      )}
-
-      {/* Live PDF Modal */}
+      {/* PDF Modal */}
       {showPdfModal && jobId && (
         <PdfPreviewModal
           jobId={jobId}
@@ -383,18 +521,39 @@ export const App: React.FC = () => {
         />
       )}
 
-      {/* Entrypoint Selection Modal */}
+      {/* Structure Modal */}
+      {activeStructureModal && (
+        <StructureModal
+          title={activeStructureModal === 'source' ? 'Source Manuscript Structure & Files' : 'Destination Template Structure & Infrastructure'}
+          fileTree={activeStructureModal === 'source' ? sourceTree : destTree}
+          detectedRules={activeStructureModal === 'dest' ? destSpec?.detected_rules : undefined}
+          onClose={() => setActiveStructureModal(null)}
+        />
+      )}
+
+      {/* Entrypoint Selector Modal */}
       {showEntrypointModal && (
         <EntrypointSelectModal
           candidates={possibleEntrypoints}
           selectedEntrypoint={selectedEntrypoint}
-          onSelect={(choice) => {
-            setSelectedEntrypoint(choice);
-            handleAnalyze(choice);
+          onSelect={(entry) => {
+            setSelectedEntrypoint(entry);
+            setShowEntrypointModal(false);
+            handleAnalyze(entry);
           }}
           onClose={() => setShowEntrypointModal(false)}
         />
       )}
+
+      {/* Developer Diagnostic Debug Panel */}
+      <DebugPanel
+        sourceFormat={sourceFormat}
+        destFormat={destFormat}
+        jobId={jobId}
+        lastError={apiError}
+        activeEndpoint={activeEndpoint}
+        httpStatus={httpStatus}
+      />
 
       <Footer />
     </div>
