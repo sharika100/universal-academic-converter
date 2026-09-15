@@ -74,6 +74,25 @@ if os.path.exists(STATIC_DIR) and os.path.exists(os.path.join(STATIC_DIR, "asset
 if os.path.exists(SAMPLES_DIR):
     app.mount("/samples", StaticFiles(directory=SAMPLES_DIR), name="samples")
 
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
+
+INLINE_INDEX_HTML = """<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Universal Academic Format Converter</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script type="module" crossorigin src="/assets/index-Df7Klhas.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DdlYOea-.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>"""
+
 @app.get("/")
 @app.get("/backend/app/main.py")
 @app.get("/backend/app/main.py/")
@@ -84,11 +103,7 @@ def root_endpoint():
     index_file = os.path.join(STATIC_DIR, "index.html")
     if os.path.exists(index_file):
         return FileResponse(index_file)
-    return {
-        "status": "ok",
-        "service": "universal-academic-converter",
-        "message": "Universal Academic Format Converter API Service"
-    }
+    return HTMLResponse(content=INLINE_INDEX_HTML, media_type="text/html")
 
 @app.get("/api/health")
 @app.get("/health")
@@ -504,15 +519,14 @@ def download_file(job_id: str, file_kind: str):
     raise HTTPException(status_code=404, detail="Requested download file not found.")
 
 # Mount built frontend dist static files if present
-if os.path.exists(STATIC_DIR):
-    @app.get("/{catchall:path}")
-    def serve_frontend(catchall: str):
-        if catchall.startswith("health") or catchall.startswith("api/health"):
-            return health_check()
-        file_path = os.path.join(STATIC_DIR, catchall)
-        if os.path.exists(file_path) and os.path.isfile(file_path):
-            return FileResponse(file_path)
-        index_file = os.path.join(STATIC_DIR, "index.html")
-        if os.path.exists(index_file):
-            return FileResponse(index_file)
-        return JSONResponse(status_code=404, content={"detail": "Not Found"})
+@app.get("/{catchall:path}")
+def serve_frontend(catchall: str):
+    if catchall in ["health", "api/health", "backend/app/main.py/health"]:
+        return health_check()
+    file_path = os.path.join(STATIC_DIR, catchall)
+    if os.path.exists(file_path) and os.path.isfile(file_path):
+        return FileResponse(file_path)
+    index_file = os.path.join(STATIC_DIR, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
+    return HTMLResponse(content=INLINE_INDEX_HTML, media_type="text/html")
