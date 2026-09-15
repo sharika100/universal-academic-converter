@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+*.local
+
+# Temporary files & test artifacts
+universal_converter_storage/
+temp/
+test_out/
+test_extract_src/
+test_extract_dest/
+
+# IDE / System
+.vscode/
+.idea/
+.DS_Store
+*.log
