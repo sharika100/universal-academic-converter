@@ -51,6 +51,7 @@ if os.path.exists(SAMPLES_DIR):
     app.mount("/samples", StaticFiles(directory=SAMPLES_DIR), name="samples")
 
 @app.get("/api/presets")
+@app.get("/presets")
 def get_presets():
     """Returns pre-loaded sample workflow packages."""
     return [
@@ -84,6 +85,7 @@ def get_presets():
     ]
 
 @app.post("/api/analyze-source")
+@app.post("/analyze-source")
 async def analyze_source(
     file: UploadFile = File(...),
     selected_entrypoint: Optional[str] = Form(None)
@@ -146,6 +148,7 @@ async def analyze_source(
     }
 
 @app.post("/api/analyze-template")
+@app.post("/analyze-template")
 async def analyze_template(
     file: UploadFile = File(...),
     job_id: str = Form(...)
@@ -194,6 +197,7 @@ async def analyze_template(
     }
 
 @app.post("/api/convert")
+@app.post("/convert")
 async def convert_document(job_id: str = Form(...)):
     job_dir = os.path.join(TEMP_STORAGE, job_id)
     udm_json_path = os.path.join(job_dir, "udm.json")
@@ -278,6 +282,7 @@ async def convert_document(job_id: str = Form(...)):
     }
 
 @app.get("/api/download/{job_id}/{file_kind}")
+@app.get("/download/{job_id}/{file_kind}")
 def download_file(job_id: str, file_kind: str):
     output_dir = os.path.join(TEMP_STORAGE, job_id, "output")
     
