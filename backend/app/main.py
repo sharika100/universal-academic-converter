@@ -93,6 +93,17 @@ INLINE_INDEX_HTML = """<!doctype html>
   </body>
 </html>"""
 
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
+
+@app.get("/debug-vercel-path")
+def debug_vercel_path(request: Request):
+    return {
+        "url_path": request.url.path,
+        "scope_path": request.scope.get("path"),
+        "raw_url": str(request.url),
+        "headers": dict(request.headers)
+    }
+
 @app.get("")
 @app.get("/")
 @app.get("/backend/app/main.py")
