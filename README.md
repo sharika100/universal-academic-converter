@@ -87,6 +87,30 @@ Open your browser to: **`http://127.0.0.1:8000`**
 
 ---
 
+## 🌐 Deploying to Vercel & Remote File Processing
+
+The application is pre-configured for instant zero-config deployment on **Vercel** (`vercel.json` and root `requirements.txt`).
+
+### How Vercel Remote File Handling Works:
+1. **Serverless Ephemeral Storage**: Uploaded manuscripts and templates are extracted and parsed in Vercel's isolated `/tmp` directory during serverless execution.
+2. **Streaming Direct Downloads**: Downloads (`.zip`, `.docx`, `.pdf`, `.json`) are delivered directly to the user's browser via high-speed HTTP streams.
+3. **Automatic Privacy Purge**: Files in `/tmp` are automatically deleted upon request completion, ensuring unpublished research manuscripts remain 100% private.
+
+### Deploy to Vercel in 2 Minutes:
+
+#### Option 1: Vercel Web Dashboard (Easiest)
+1. Push your repository to GitHub.
+2. Go to [Vercel](https://vercel.com) and click **"Add New Project"**.
+3. Import your `universal-academic-converter` repository.
+4. Click **Deploy**. Vercel will automatically detect `vercel.json` and build both the FastAPI serverless backend and React frontend!
+
+#### Option 2: Vercel CLI
+```bash
+cmd /c "npx vercel"
+```
+
+---
+
 ## 🧪 Testing & Verification
 
 Run the integration test suite:
