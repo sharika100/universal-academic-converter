@@ -55,6 +55,17 @@ DIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "
 if os.path.exists(SAMPLES_DIR):
     app.mount("/samples", StaticFiles(directory=SAMPLES_DIR), name="samples")
 
+@app.get("/")
+def root_endpoint():
+    index_file = os.path.join(DIST_DIR, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
+    return {
+        "status": "ok",
+        "service": "universal-academic-converter",
+        "message": "Universal Academic Format Converter API Service"
+    }
+
 @app.get("/api/health")
 @app.get("/health")
 def health_check():
