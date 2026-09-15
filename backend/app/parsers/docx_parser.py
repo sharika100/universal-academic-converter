@@ -304,16 +304,38 @@ class DocxParser:
         return {"full_text": "".join(full_text).strip(), "runs": runs_info}
 
     @staticmethod
-    def _parse_author_header(header_data: List[Dict[str, Any]]) -> Tuple[List[Author], List[Affiliation], str]:
+    def _parse_author_header(header_data: List[Any]) -> Tuple[List[Author], List[Affiliation], str]:
         authors: List[Author] = []
         affiliations: List[Affiliation] = []
-        raw_lines = [d["full_text"] for d in header_data if d["full_text"]]
+        
+        # Defensive normalization of input header_data elements (accepts dicts, strings, or objects)
+        normalized_entries: List[Dict[str, Any]] = []
+        raw_lines: List[str] = []
+        
+        for item in header_data:
+            if isinstance(item, str):
+                txt = item.strip()
+                if txt:
+                    normalized_entries.append({"full_text": txt, "runs": [{"text": txt, "is_super": False}]})
+                    raw_lines.append(txt)
+            elif isinstance(item, dict):
+                txt = str(item.get("full_text", "")).strip()
+                runs = item.get("runs", [])
+                if txt:
+                    normalized_entries.append({"full_text": txt, "runs": runs if isinstance(runs, list) else []})
+                    raw_lines.append(txt)
+            elif hasattr(item, "text"):
+                txt = str(getattr(item, "text", "")).strip()
+                if txt:
+                    normalized_entries.append({"full_text": txt, "runs": [{"text": txt, "is_super": False}]})
+                    raw_lines.append(txt)
+                    
         raw_header_str = "\n".join(raw_lines)
         
         author_entries = []
         affil_entries = []
         
-        for d in header_data:
+        for d in normalized_entries:
             line_str = d["full_text"]
             if not line_str:
                 continue
@@ -348,7 +370,8 @@ class DocxParser:
             if line_lower.startswith(("abstract", "keyword", "intro", "table", "fig")):
                 continue
             # Extract superscript run text markers if present
-            superscripts = [r["text"].strip() for r in a_d["runs"] if r["is_super"] and r["text"].strip()]
+            runs = a_d.get("runs", [])
+            superscripts = [r.get("text", "").strip() for r in runs if isinstance(r, dict) and r.get("is_super") and r.get("text")]
             
             # Replace commas between digits in affiliation tags e.g. "1,2" -> "1;2" to avoid splitting author names on tag commas
             line_str_clean = re.sub(r'(\d)\s*,\s*(\d)', r'\1;\2', line_str)
