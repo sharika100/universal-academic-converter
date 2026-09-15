@@ -9,6 +9,7 @@ class Author(BaseModel):
     affiliation_ids: List[str] = Field(default_factory=list)
     corresponding: bool = False
     orcid: Optional[str] = None
+    role: Optional[str] = None
 
 class Affiliation(BaseModel):
     id: str

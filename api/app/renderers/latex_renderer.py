@@ -135,10 +135,18 @@ class LatexRenderer:
         if spec.author_style == "ieee":
             author_blocks = []
             for a in authors:
+                aff_lines = []
+                if hasattr(a, "role") and a.role:
+                    aff_lines.append(f"\\textit{{{a.role}}}")
                 aff_names = [aff.institution for aff in affiliations if aff.id in a.affiliation_ids]
-                aff_text = " \\\\ ".join(aff_names) if aff_names else (affiliations[0].institution if affiliations else "Academic Department")
-                email_line = f" \\\\ \\textit{{{a.email}}}" if a.email else ""
-                author_blocks.append(f"\\IEEEauthorblockN{{{a.name}}}\n\\IEEEauthorblockA{{{aff_text}{email_line}}}")
+                if aff_names:
+                    aff_lines.extend(aff_names)
+                elif affiliations:
+                    aff_lines.append(affiliations[0].institution)
+                if a.email:
+                    aff_lines.append(a.email)
+                aff_text = " \\\\ ".join(aff_lines) if aff_lines else "Academic Department"
+                author_blocks.append(f"\\IEEEauthorblockN{{{a.name}}}\n\\IEEEauthorblockA{{{aff_text}}}")
             lines.append(f"\\author{{\n{ ' \\and '.join(author_blocks) }\n}}\n\\maketitle\n")
             
         elif spec.author_style == "springer":
