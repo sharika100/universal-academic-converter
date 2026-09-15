@@ -2,6 +2,7 @@ import os
 import re
 import base64
 import hashlib
+import io
 from typing import List, Dict, Any, Tuple, Optional
 import docx
 from docx.document import Document as DocxDocument
@@ -9,6 +10,7 @@ from docx.oxml.text.paragraph import CT_P
 from docx.oxml.table import CT_Tbl
 from docx.table import Table as DocxTable
 from docx.text.paragraph import Paragraph as DocxParagraph
+from PIL import Image
 
 from app.models.udm import (
     UniversalDocumentModel, Metadata, Author, Affiliation,
@@ -26,7 +28,7 @@ class DocxParser:
         udm = UniversalDocumentModel(source_format="DOCX")
         warnings = []
         
-        # 1. Extract Images from document package
+        # 1. Extract Images from document package with image metadata (dimensions & aspect ratio)
         rel_image_map = DocxParser._extract_images(doc)
         
         # Global state for document traversal
@@ -36,7 +38,7 @@ class DocxParser:
         title_idx = -1
         first_heading_idx = len(body_elements)
         
-        # Locate Title and first Section Heading
+        # Locate Title and first Section Heading dynamically
         for idx, elem in enumerate(body_elements):
             if isinstance(elem, CT_P):
                 p = DocxParagraph(elem, doc)
@@ -46,16 +48,24 @@ class DocxParser:
                     continue
                 if title_idx == -1 and ("title" in style_name or (len(text) > 5 and len(text) < 180 and idx < 5)):
                     title_idx = idx
-                if "heading 1" in style_name or (text.isupper() and len(text) < 60 and idx > 0):
+                
+                # Strict section heading detection for first body heading
+                is_explicit_heading = (
+                    "heading 1" in style_name
+                    or text.lower().startswith("abstract")
+                    or bool(re.match(r'^(?:1\.|I\.|ONE)\s+[A-Za-z]', text, re.I))
+                )
+                if is_explicit_heading and idx > 0:
                     first_heading_idx = min(first_heading_idx, idx)
                     
-        # Parse Title & Author/Affiliation block from top section
+        # Parse Title & Author/Affiliation block from top section up to first_heading_idx
         header_lines = []
         if title_idx != -1:
             title_p = DocxParagraph(body_elements[title_idx], doc)
             udm.metadata.title = title_p.text.strip()
-            header_end = min(first_heading_idx, title_idx + 12)
             
+            # Dynamic header boundary scanning up to first_heading_idx
+            header_end = first_heading_idx
             for idx in range(title_idx + 1, header_end):
                 elem = body_elements[idx]
                 if isinstance(elem, CT_P):
@@ -86,7 +96,7 @@ class DocxParser:
         first_heading_found = False
         pending_caption = None
         
-        def process_paragraph_element(p: DocxParagraph, elem_idx: int):
+        def process_paragraph_element(p: DocxParagraph, elem_idx: int, is_inside_table: bool = False):
             nonlocal occurrence_counter, current_section, pending_caption, abstract_found, references_found, first_heading_found
             
             text = p.text.strip()
@@ -121,9 +131,14 @@ class DocxParser:
                                     caption_text = next_txt
                                     break
                                     
-                    is_equation = not caption_text and ("w:math" in p._element.xml or "m:oMath" in p._element.xml)
+                    w = img_info.get("width", -1)
+                    h = img_info.get("height", -1)
+                    ar = img_info.get("aspect_ratio", 0)
                     
-                    if is_equation:
+                    # Classification: Small height formula screenshots vs figures
+                    is_equation_image = (ar > 2.5 and 0 < h < 120) or ("w:math" in p._element.xml or "m:oMath" in p._element.xml)
+                    
+                    if is_equation_image:
                         current_section.blocks.append(Equation(
                             math_latex=f"\\includegraphics[max width=0.8\\linewidth]{{figures/{fname}}}",
                             label=f"eq_{occurrence_counter}"
@@ -137,7 +152,7 @@ class DocxParser:
                             media_path=img_info.get("media_path"),
                             content_type=f"image/{ext.lstrip('.')}",
                             sha256=img_info.get("sha256"),
-                            caption=caption_text or f"Figure {occurrence_counter}",
+                            caption=caption_text, # Keep exact source caption, do NOT invent "Figure N"
                             image_filename=fname,
                             image_data_b64=img_info["b64"],
                             position_index=occurrence_counter
@@ -159,13 +174,14 @@ class DocxParser:
             # Prevent header metadata and author emails from leaking into body text
             if elem_idx < first_heading_idx:
                 text_lower = text.lower()
-                if "@" in text or text_lower in consumed_header_texts:
+                email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', text)
+                if email_match or text_lower in consumed_header_texts:
                     return
                 if any(kw in text_lower for kw in ["research scholar", "professor", "associate professor", "assistant professor", "coimbatore", "tamil nadu", "department", "university", "institute"]):
                     return
                 if udm.metadata.authors and any(a.name.lower() in text_lower for a in udm.metadata.authors):
                     return
-                if udm.metadata.affiliations and any(aff.institution.lower() in text_lower for aff in udm.metadata.affiliations):
+                if udm.metadata.affiliations and any(aff.institution.lower() in text_lower for aff in udm.metadata.affiliations if aff.institution):
                     return
                     
             # Check for Abstract
@@ -185,11 +201,15 @@ class DocxParser:
                 kw_str = re.sub(r'^(keywords?[:\.\s-]*)', '', text, flags=re.I)
                 udm.metadata.keywords = [k.strip() for k in re.split(r'[,;]', kw_str) if k.strip()]
                 return
+
+            # Table paragraphs must not create section headings
+            if is_inside_table:
+                return
                 
-            # Check for Headings
+            # Check for Headings with Strict Numbering & Style Filters
             is_heading = False
             heading_level = 1
-            if "heading 1" in style_name or (text.isupper() and len(text) < 60 and elem_idx >= first_heading_idx):
+            if "heading 1" in style_name:
                 is_heading = True
                 heading_level = 1
             elif "heading 2" in style_name:
@@ -198,6 +218,11 @@ class DocxParser:
             elif "heading 3" in style_name:
                 is_heading = True
                 heading_level = 3
+            elif elem_idx >= first_heading_idx and len(text) < 60:
+                # Require explicit section numbering pattern followed by text
+                if bool(re.match(r'^(?:\d+|[A-Z]|[IVXLCDM]+)\.\s+[A-Za-z]', text)):
+                    is_heading = True
+                    heading_level = 1
                 
             if is_heading:
                 clean_title = re.sub(r'^\d+[\.\s]*', '', text).strip() or text
@@ -258,7 +283,7 @@ class DocxParser:
                 continue
             if isinstance(elem, CT_P):
                 p = DocxParagraph(elem, doc)
-                process_paragraph_element(p, idx)
+                process_paragraph_element(p, idx, is_inside_table=False)
             elif isinstance(elem, CT_Tbl):
                 t = DocxTable(elem, doc)
                 headers = []
@@ -267,7 +292,7 @@ class DocxParser:
                     row_cells = []
                     for cell in row.cells:
                         for cell_p in cell.paragraphs:
-                            process_paragraph_element(cell_p, idx)
+                            process_paragraph_element(cell_p, idx, is_inside_table=True)
                         row_cells.append(cell.text.strip())
                     if r_idx == 0:
                         headers = row_cells
@@ -306,12 +331,25 @@ class DocxParser:
                     b64_str = base64.b64encode(img_bytes).decode("utf-8")
                     sha256_hash = hashlib.sha256(img_bytes).hexdigest()
                     ext = os.path.splitext(rel.target_ref)[1].lower() or ".png"
+                    
+                    w, h = -1, -1
+                    try:
+                        with Image.open(io.BytesIO(img_bytes)) as pil_img:
+                            w, h = pil_img.size
+                    except Exception:
+                        pass
+                        
+                    ar = round(w / h, 2) if h > 0 else 0
+                    
                     image_map[rId] = {
                         "rId": rId,
                         "b64": b64_str,
                         "sha256": sha256_hash,
                         "bytes": img_bytes,
                         "ext": ext,
+                        "width": w,
+                        "height": h,
+                        "aspect_ratio": ar,
                         "media_path": rel.target_ref
                     }
                 except Exception:
@@ -426,7 +464,7 @@ class DocxParser:
                     if aff_id in affil_map:
                         existing = affil_map[aff_id].institution
                         if line_str not in existing:
-                            affil_map[aff_id].institution = f"{existing}, {line_str}"
+                            affil_map[aff_id].institution = f"{existing}, {line_str}" if existing else line_str
                 continue
                 
             # Process Author Name line or Multiple Author Names
@@ -457,7 +495,7 @@ class DocxParser:
                         aff_ids = [aff_id]
                         
                     if aff_id not in affil_map:
-                        inst_text = ", ".join(current_affil_lines) if current_affil_lines else "Academic Department"
+                        inst_text = ", ".join(current_affil_lines) if current_affil_lines else ""
                         aff_obj = Affiliation(id=aff_id, institution=inst_text, raw_text=line_str)
                         affiliations.append(aff_obj)
                         affil_map[aff_id] = aff_obj
@@ -487,7 +525,10 @@ class DocxParser:
                     
         if current_affil_lines and affiliations:
             extra_text = ", ".join(current_affil_lines)
-            if extra_text not in affiliations[0].institution:
-                affiliations[0].institution += f", {extra_text}"
+            if extra_text not in affiliations[-1].institution:
+                if affiliations[-1].institution:
+                    affiliations[-1].institution += f", {extra_text}"
+                else:
+                    affiliations[-1].institution = extra_text
                 
         return authors, affiliations, raw_header_str

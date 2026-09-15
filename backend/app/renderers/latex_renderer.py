@@ -44,7 +44,8 @@ class LatexRenderer:
         
         for sec in udm.sections:
             for blk in sec.blocks:
-                if blk.get("type") == "figure":
+                btype = blk.get("type")
+                if btype in ["figure", "equation"]:
                     b64_data = blk.get("image_data_b64")
                     raw_fname = blk.get("image_filename")
                     
@@ -68,18 +69,16 @@ class LatexRenderer:
         bib_path = os.path.join(output_dir, "references.bib")
         with open(bib_path, "w", encoding="utf-8") as fh:
             for ref in udm.references:
-                if ref.raw_bibtex:
-                    fh.write(ref.raw_bibtex.strip() + "\n\n")
-                else:
-                    authors_str = " and ".join(ref.authors) if ref.authors else "Academic Author"
-                    fh.write(f"@article{{{ref.cite_key},\n")
+                fh.write(f"@article{{{ref.cite_key},\n")
+                if ref.title:
                     fh.write(f"  title = {{{ref.title}}},\n")
-                    fh.write(f"  author = {{{authors_str}}},\n")
-                    if ref.journal:
-                        fh.write(f"  journal = {{{ref.journal}}},\n")
-                    if ref.year:
-                        fh.write(f"  year = {{{ref.year}}},\n")
-                    fh.write("}\n\n")
+                if ref.authors:
+                    fh.write(f"  author = {{{' and '.join(ref.authors)}}},\n")
+                if ref.journal:
+                    fh.write(f"  journal = {{{ref.journal}}},\n")
+                if ref.year:
+                    fh.write(f"  year = {{{ref.year}}},\n")
+                fh.write("}\n\n")
         created_files.append("references.bib")
         
         # 4. Generate target main.tex matching target TemplateSpecification macros
@@ -132,21 +131,24 @@ class LatexRenderer:
         authors = udm.metadata.authors
         affiliations = udm.metadata.affiliations
         
-        if spec.author_style == "ieee":
+        if spec.author_style == "ieee" or spec.document_class == "IEEEtran":
             author_blocks = []
             for a in authors:
                 aff_lines = []
                 if hasattr(a, "role") and a.role:
                     aff_lines.append(f"\\textit{{{a.role}}}")
-                aff_names = [aff.institution for aff in affiliations if aff.id in a.affiliation_ids]
+                aff_names = [aff.institution for aff in affiliations if aff.id in a.affiliation_ids and aff.institution]
                 if aff_names:
                     aff_lines.extend(aff_names)
-                elif affiliations:
+                elif affiliations and affiliations[0].institution:
                     aff_lines.append(affiliations[0].institution)
                 if a.email:
                     aff_lines.append(a.email)
-                aff_text = " \\\\ ".join(aff_lines) if aff_lines else "Academic Department"
-                author_blocks.append(f"\\IEEEauthorblockN{{{a.name}}}\n\\IEEEauthorblockA{{{aff_text}}}")
+                aff_text = " \\\\ ".join(aff_lines) if aff_lines else ""
+                if aff_text:
+                    author_blocks.append(f"\\IEEEauthorblockN{{{a.name}}}\n\\IEEEauthorblockA{{{aff_text}}}")
+                else:
+                    author_blocks.append(f"\\IEEEauthorblockN{{{a.name}}}")
             lines.append(f"\\author{{\n{ ' \\and '.join(author_blocks) }\n}}\n\\maketitle\n")
             
         elif spec.author_style == "springer":
@@ -158,7 +160,8 @@ class LatexRenderer:
                 email_str = f"\\email{{{a.email}}}" if a.email else ""
                 lines.append(f"\\author[{aff_tag}]{{\\fnm{{{fnm}}} \\sur{{{sur}}}}}{email_str}")
             for aff in affiliations:
-                lines.append(f"\\affil[{aff.id}]{{\\orgname{{{aff.institution}}}}}")
+                if aff.institution:
+                    lines.append(f"\\affil[{aff.id}]{{\\orgname{{{aff.institution}}}}}")
             lines.append("\\maketitle\n")
             
         elif spec.author_style == "elsevier":
@@ -166,7 +169,8 @@ class LatexRenderer:
                 aff_tag = ",".join(a.affiliation_ids) if a.affiliation_ids else "1"
                 lines.append(f"\\author[{aff_tag}]{{{a.name}}}")
             for aff in affiliations:
-                lines.append(f"\\address[{aff.id}]{{{aff.institution}}}")
+                if aff.institution:
+                    lines.append(f"\\address[{aff.id}]{{{aff.institution}}}")
             lines.append("\\maketitle\n")
             
         elif spec.author_style == "lncs":
@@ -175,8 +179,11 @@ class LatexRenderer:
                 inst_tag = ",".join(a.affiliation_ids) if a.affiliation_ids else "1"
                 author_names.append(f"{a.name}\\inst{{{inst_tag}}}")
             lines.append(f"\\author{{{' \\and '.join(author_names)}}}")
-            inst_text = " \\and ".join([aff.institution for aff in affiliations]) if affiliations else "Academic Institution"
-            lines.append(f"\\institute{{{inst_text}}}\n\\maketitle\n")
+            inst_text = " \\and ".join([aff.institution for aff in affiliations if aff.institution])
+            if inst_text:
+                lines.append(f"\\institute{{{inst_text}}}\n\\maketitle\n")
+            else:
+                lines.append("\\maketitle\n")
             
         else: # Standard / ACM / default
             author_names = []
@@ -185,8 +192,9 @@ class LatexRenderer:
                 author_names.append(f"{a.name}$^{{{inst_tag}}}$")
             lines.append(f"\\author{{{', '.join(author_names)}}}")
             if affiliations:
-                inst_lines = [f"$^{{{aff.id}}}$ {aff.institution}" for aff in affiliations]
-                lines.append(f"\\institute{{{ ' \\\\ '.join(inst_lines) }}}")
+                inst_lines = [f"$^{{{aff.id}}}$ {aff.institution}" for aff in affiliations if aff.institution]
+                if inst_lines:
+                    lines.append(f"\\institute{{{ ' \\\\ '.join(inst_lines) }}}")
             lines.append("\\maketitle\n")
             
         # Abstract
@@ -217,24 +225,32 @@ class LatexRenderer:
                         lines.append(f"  \\item {item.get('text', '')}")
                     lines.append(f"\\end{{{env}}}\n")
                 elif btype == "equation":
-                    lines.append("\\begin{equation}")
-                    lines.append(blk.get("math_latex", ""))
-                    if blk.get("label"):
-                        lines.append(f"  \\label{{{blk.get('label')}}}")
-                    lines.append("\\end{equation}\n")
+                    m_tex = blk.get("math_latex", "")
+                    if "\\includegraphics" in m_tex:
+                        lines.append("\\begin{center}")
+                        lines.append(f"  {m_tex}")
+                        lines.append("\\end{center}\n")
+                    else:
+                        lines.append("\\begin{equation}")
+                        lines.append(m_tex)
+                        if blk.get("label"):
+                            lines.append(f"  \\label{{{blk.get('label')}}}")
+                        lines.append("\\end{equation}\n")
                 elif btype == "figure":
                     lines.append("\\begin{figure}[htbp]")
                     lines.append("  \\centering")
                     fname = blk.get("image_filename") or "figure_1.png"
                     lines.append(f"  \\includegraphics[width=0.8\\linewidth]{{figures/{fname}}}")
-                    lines.append(f"  \\caption{{{blk.get('caption', '')}}}")
+                    if blk.get("caption"):
+                        lines.append(f"  \\caption{{{blk.get('caption')}}}")
                     if blk.get("label"):
                         lines.append(f"  \\label{{{blk.get('label')}}}")
                     lines.append("\\end{figure}\n")
                 elif btype == "table":
                     lines.append("\\begin{table}[htbp]")
                     lines.append("  \\centering")
-                    lines.append(f"  \\caption{{{blk.get('caption', '')}}}")
+                    if blk.get("caption"):
+                        lines.append(f"  \\caption{{{blk.get('caption')}}}")
                     headers = blk.get("headers", [])
                     rows = blk.get("rows", [])
                     num_cols = len(headers) if headers else (len(rows[0]) if rows else 1)
