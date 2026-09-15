@@ -14,7 +14,6 @@ class TemplateAnalyzer:
         elif template_path.endswith(".zip") or os.path.isdir(template_path):
             return TemplateAnalyzer._analyze_latex_zip_template(template_path)
         else:
-            # Single .tex or .cls file
             spec = TemplateSpecification(format_type="latex")
             spec.detected_rules.append("Single TeX/CLS template file uploaded")
             return spec
@@ -27,7 +26,6 @@ class TemplateAnalyzer:
         detected_styles = [s.name for s in doc.styles]
         spec.detected_rules.append(f"Detected {len(detected_styles)} DOCX paragraph/character styles")
         
-        # Check title / author / heading styles
         if "Title" in detected_styles:
             spec.detected_rules.append("Title style detected")
         if "Author" in detected_styles or "Subtitle" in detected_styles:
@@ -47,7 +45,6 @@ class TemplateAnalyzer:
         warnings = []
         required_files = []
         
-        # 1. Find all required infrastructure files (.cls, .sty, .bst, logos)
         for root, _, files in os.walk(project_dir):
             for f in files:
                 rel_f = os.path.relpath(os.path.join(root, f), project_dir).replace("\\", "/")
@@ -58,7 +55,6 @@ class TemplateAnalyzer:
         spec.required_files = required_files
         rules.append(f"Detected {len(required_files)} target template infrastructure files (.cls, .sty, .bst, assets)")
         
-        # 2. Find primary sample entry point .tex
         entrypoint_rel, candidates, _ = find_latex_entrypoint(project_dir)
         if entrypoint_rel:
             spec.entry_point_file = entrypoint_rel
@@ -67,7 +63,6 @@ class TemplateAnalyzer:
                 with open(main_p, "r", encoding="utf-8", errors="ignore") as fh:
                     sample_content = fh.read()
                     
-                # Document class
                 cls_match = re.search(r'\\documentclass(?:\[([^\]]*)\])?\{([^}]+)\}', sample_content)
                 if cls_match:
                     opts_str = cls_match.group(1)
@@ -77,23 +72,25 @@ class TemplateAnalyzer:
                     rules.append(f"Document class: \\documentclass[{opts_str or ''}]{{{spec.document_class}}}")
                     
                 # Determine Author Formatting Style
-                if "IEEEauthorblockN" in sample_content:
+                if "IEEEauthorblockN" in sample_content or "IEEEtran" in spec.document_class:
                     spec.author_style = "ieee"
-                    rules.append("Author block: IEEE (\IEEEauthorblockN & \IEEEauthorblockA)")
-                elif r"\fnm" in sample_content or r"\sur" in sample_content or "sn-jnl" in spec.document_class:
+                    rules.append("Author block: IEEE (\\IEEEauthorblockN & \\IEEEauthorblockA)")
+                elif r"\fnm" in sample_content or r"\sur" in sample_content or "sn-jnl" in spec.document_class or r"\affil" in sample_content:
                     spec.author_style = "springer"
-                    rules.append("Author block: Springer (\author[id]{\fnm{} \sur{}})")
+                    rules.append("Author block: Springer (\\author[id]{\\fnm{} \\sur{}}, \\affil[id]{})")
                 elif "elsarticle" in spec.document_class or r"\address" in sample_content:
                     spec.author_style = "elsevier"
-                    rules.append("Author block: Elsevier (\author[id]{}, \address[id]{})")
+                    rules.append("Author block: Elsevier (\\author[id]{}, \\address[id]{})")
+                elif "llncs" in spec.document_class or r"\inst" in sample_content:
+                    spec.author_style = "lncs"
+                    rules.append("Author block: LNCS (\\author{...\\inst{1}}, \\institute{})")
                 elif "acmart" in spec.document_class:
                     spec.author_style = "acm"
-                    rules.append("Author block: ACM (\author{}, \affiliation{})")
+                    rules.append("Author block: ACM (\\author{}, \\affiliation{})")
                 else:
                     spec.author_style = "standard"
-                    rules.append("Author block: Standard LaTeX (\author{}, \institute{})")
+                    rules.append("Author block: Standard LaTeX (\\author{}, \\institute{})")
                     
-                # Bibliography / Citation System
                 bst_match = re.search(r'\\bibliographystyle\{([^}]+)\}', sample_content)
                 if bst_match:
                     spec.bib_style = bst_match.group(1).strip()

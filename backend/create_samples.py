@@ -2,6 +2,7 @@ import os
 import zipfile
 import docx
 from docx.shared import Inches, Pt
+from PIL import Image, ImageDraw
 
 def generate_samples(base_dir: str):
     os.makedirs(base_dir, exist_ok=True)
@@ -115,7 +116,6 @@ We have presented a unified document compiler framework that preserves scientifi
         fh.write(bib_tex)
         
     # Create dummy PNG figure
-    from PIL import Image, ImageDraw
     img = Image.new('RGB', (400, 200), color = (30, 41, 59))
     d = ImageDraw.Draw(img)
     d.text((40, 90), "UDM System Architecture Diagram", fill=(255,255,255))
@@ -170,15 +170,46 @@ Sample text for Springer format.
                 rel_p = os.path.relpath(abs_p, springer_dir)
                 zf.write(abs_p, rel_p)
 
-    # 3. Create Sample DOCX Manuscript
+    # 3. Create Multi-Figure and Multi-Author Sample DOCX Manuscript
     docx_doc = docx.Document()
     docx_doc.add_heading("Universal Academic Document Model Architecture", level=0)
-    docx_doc.add_paragraph("Dr. Jane Doe, Professor of Computer Science")
-    docx_doc.add_paragraph("Abstract: Academic document conversion requires semantic structure preservation.")
+    docx_doc.add_paragraph("Alice Smith1, Bob Jones1,2, Charlie Brown2")
+    docx_doc.add_paragraph("1 Department of Computer Science, Stanford University, CA, USA")
+    docx_doc.add_paragraph("2 Department of Electrical Engineering, MIT, MA, USA")
+    docx_doc.add_paragraph("Abstract: Academic document conversion requires semantic structure and multi-figure preservation.")
     docx_doc.add_heading("1. Introduction", level=1)
     docx_doc.add_paragraph("This manuscript demonstrates automatic document compilation from DOCX format.")
+    
+    # Create 3 distinct images for sample DOCX
+    img1_path = os.path.join(base_dir, "tmp_sample_fig1.png")
+    img2_path = os.path.join(base_dir, "tmp_sample_fig2.png")
+    img3_path = os.path.join(base_dir, "tmp_sample_fig3.png")
+    
+    i1 = Image.new('RGB', (350, 150), color=(220, 38, 38))
+    ImageDraw.Draw(i1).text((40, 60), "Figure 1: Architecture Pipeline", fill=(255,255,255))
+    i1.save(img1_path)
+    
+    i2 = Image.new('RGB', (350, 150), color=(16, 185, 129))
+    ImageDraw.Draw(i2).text((40, 60), "Figure 2: Data Flow Chart", fill=(255,255,255))
+    i2.save(img2_path)
+    
+    i3 = Image.new('RGB', (350, 150), color=(37, 99, 235))
+    ImageDraw.Draw(i3).text((40, 60), "Figure 3: Experimental Results", fill=(255,255,255))
+    i3.save(img3_path)
+    
+    docx_doc.add_paragraph("Overview of system design is depicted below.")
+    docx_doc.add_picture(img1_path, width=Inches(3))
+    docx_doc.add_paragraph("Figure 1: Architecture Pipeline Diagram")
+    
     docx_doc.add_heading("2. System Design", level=1)
-    docx_doc.add_paragraph("The parser extracts sections, tables, and references.")
+    docx_doc.add_paragraph("The parser extracts sections, tables, and figures.")
+    docx_doc.add_picture(img2_path, width=Inches(3))
+    docx_doc.add_paragraph("Figure 2: Data Flow Chart")
+    
+    docx_doc.add_heading("3. Experimental Evaluation", level=1)
+    docx_doc.add_paragraph("Performance across workflows is shown in Figure 3.")
+    docx_doc.add_picture(img3_path, width=Inches(3))
+    docx_doc.add_paragraph("Figure 3: Experimental Results Graph")
     
     t = docx_doc.add_table(rows=2, cols=2)
     t.cell(0, 0).text = "Metric"
@@ -187,12 +218,17 @@ Sample text for Springer format.
     t.cell(1, 1).text = "97%"
     
     docx_doc.add_heading("References", level=1)
-    docx_doc.add_paragraph("[1] Doe, J. Universal Document Compiler, 2024.")
+    docx_doc.add_paragraph("[1] Smith, A. Universal Document Compiler, 2024.")
     
     docx_sample_path = os.path.join(base_dir, "sample_manuscript.docx")
     docx_doc.save(docx_sample_path)
     
-    print("Sample packages created successfully.")
+    # Cleanup temporary images
+    for p in [img1_path, img2_path, img3_path]:
+        if os.path.exists(p):
+            os.remove(p)
+            
+    print("Sample packages created successfully with multi-figure and multi-author data.")
 
 if __name__ == "__main__":
     generate_samples("C:/Users/shari/.gemini/antigravity/scratch/universal-academic-converter/samples")

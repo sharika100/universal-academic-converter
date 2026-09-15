@@ -18,7 +18,7 @@ class LatexRenderer:
         """
         Renders UniversalDocumentModel into a complete target LaTeX project ZIP.
         Preserves target template infrastructure (.cls, .sty, .bst, assets).
-        Generates target main.tex, references.bib, and places figure images.
+        Generates target main.tex, references.bib, and places all distinct figure images.
         """
         os.makedirs(output_dir, exist_ok=True)
         created_files = []
@@ -29,28 +29,38 @@ class LatexRenderer:
                 for f in files:
                     ext = os.path.splitext(f)[1].lower()
                     rel_p = os.path.relpath(os.path.join(root, f), dest_template_dir)
-                    # Copy template files (.cls, .sty, .bst, logos, sample bib) EXCEPT target sample.tex
                     if ext in [".cls", ".sty", ".bst", ".png", ".jpg", ".eps", ".pdf"] or f.endswith(".bib"):
                         dest_file_path = os.path.join(output_dir, rel_p)
                         os.makedirs(os.path.dirname(dest_file_path), exist_ok=True)
                         shutil.copy2(os.path.join(root, f), dest_file_path)
                         created_files.append(rel_p.replace("\\", "/"))
 
-        # 2. Prepare figures directory and write figure images from UDM
+        # 2. Prepare figures directory and write every distinct figure image from UDM
         fig_dir = os.path.join(output_dir, "figures")
         os.makedirs(fig_dir, exist_ok=True)
+        
+        written_fig_names = set()
+        fig_idx = 1
         
         for sec in udm.sections:
             for blk in sec.blocks:
                 if blk.get("type") == "figure":
                     b64_data = blk.get("image_data_b64")
-                    fname = blk.get("image_filename") or f"{blk.get('id', 'fig')}.png"
+                    raw_fname = blk.get("image_filename")
+                    
+                    if not raw_fname or raw_fname in written_fig_names or raw_fname == "fig.png":
+                        raw_fname = f"figure_{fig_idx}.png"
+                        blk["image_filename"] = raw_fname
+                        
+                    written_fig_names.add(raw_fname)
+                    fig_idx += 1
+                    
                     if b64_data:
                         try:
-                            img_path = os.path.join(fig_dir, fname)
+                            img_path = os.path.join(fig_dir, raw_fname)
                             with open(img_path, "wb") as fh:
                                 fh.write(base64.b64decode(b64_data))
-                            created_files.append(f"figures/{fname}")
+                            created_files.append(f"figures/{raw_fname}")
                         except Exception:
                             pass
                             
@@ -94,7 +104,6 @@ class LatexRenderer:
     def _generate_main_tex(udm: UniversalDocumentModel, spec: TemplateSpecification) -> str:
         lines = []
         
-        # Documentclass declaration
         opts = f"[{','.join(spec.class_options)}]" if spec.class_options else ""
         cls = spec.document_class or "article"
         lines.append(f"\\documentclass{opts}{{{cls}}}")
@@ -111,36 +120,57 @@ class LatexRenderer:
         # Title
         lines.append(f"\\title{{{udm.metadata.title}}}")
         
-        # Authors & Affiliations based on spec.author_style
+        # Render Authors and Affiliations according to target template style
+        authors = udm.metadata.authors
+        affiliations = udm.metadata.affiliations
+        
         if spec.author_style == "ieee":
             author_blocks = []
-            for idx, a in enumerate(udm.metadata.authors):
-                affil_text = udm.metadata.affiliations[idx].institution if idx < len(udm.metadata.affiliations) else "Academic Department"
-                author_blocks.append(f"\\IEEEauthorblockN{{{a.name}}}\n\\IEEEauthorblockA{{{affil_text}}}")
-            lines.append(f"\\author{{{ ' \\and '.join(author_blocks) }}}\n\\maketitle\n")
+            for a in authors:
+                aff_names = [aff.institution for aff in affiliations if aff.id in a.affiliation_ids]
+                aff_text = " \\\\ ".join(aff_names) if aff_names else (affiliations[0].institution if affiliations else "Academic Department")
+                email_line = f" \\\\ \\textit{{{a.email}}}" if a.email else ""
+                author_blocks.append(f"\\IEEEauthorblockN{{{a.name}}}\n\\IEEEauthorblockA{{{aff_text}{email_line}}}")
+            lines.append(f"\\author{{\n{ ' \\and '.join(author_blocks) }\n}}\n\\maketitle\n")
             
         elif spec.author_style == "springer":
-            for idx, a in enumerate(udm.metadata.authors):
+            for a in authors:
                 parts = a.name.split()
                 fnm = parts[0] if parts else ""
                 sur = " ".join(parts[1:]) if len(parts) > 1 else a.name
-                lines.append(f"\\author[1]{{\\fnm{{{fnm}}} \\sur{{{sur}}}}}")
-            for aff in udm.metadata.affiliations:
-                lines.append(f"\\affiliation[1]{{\\orgname{{{aff.institution}}}}}")
+                aff_tag = ",".join(a.affiliation_ids) if a.affiliation_ids else "1"
+                email_str = f"\\email{{{a.email}}}" if a.email else ""
+                lines.append(f"\\author[{aff_tag}]{{\\fnm{{{fnm}}} \\sur{{{sur}}}}}{email_str}")
+            for aff in affiliations:
+                lines.append(f"\\affil[{aff.id}]{{\\orgname{{{aff.institution}}}}}")
             lines.append("\\maketitle\n")
             
         elif spec.author_style == "elsevier":
-            for a in udm.metadata.authors:
-                lines.append(f"\\author[1]{{{a.name}}}")
-            for aff in udm.metadata.affiliations:
-                lines.append(f"\\address[1]{{{aff.institution}}}")
+            for a in authors:
+                aff_tag = ",".join(a.affiliation_ids) if a.affiliation_ids else "1"
+                lines.append(f"\\author[{aff_tag}]{{{a.name}}}")
+            for aff in affiliations:
+                lines.append(f"\\address[{aff.id}]{{{aff.institution}}}")
             lines.append("\\maketitle\n")
             
-        else: # Standard / ACM
-            names = ", ".join([a.name for a in udm.metadata.authors])
-            lines.append(f"\\author{{{names}}}")
-            if udm.metadata.affiliations:
-                lines.append(f"\\institute{{{udm.metadata.affiliations[0].institution}}}")
+        elif spec.author_style == "lncs":
+            author_names = []
+            for a in authors:
+                inst_tag = ",".join(a.affiliation_ids) if a.affiliation_ids else "1"
+                author_names.append(f"{a.name}\\inst{{{inst_tag}}}")
+            lines.append(f"\\author{{{' \\and '.join(author_names)}}}")
+            inst_text = " \\and ".join([aff.institution for aff in affiliations]) if affiliations else "Academic Institution"
+            lines.append(f"\\institute{{{inst_text}}}\n\\maketitle\n")
+            
+        else: # Standard / ACM / default
+            author_names = []
+            for a in authors:
+                inst_tag = ",".join(a.affiliation_ids) if a.affiliation_ids else "1"
+                author_names.append(f"{a.name}$^{{{inst_tag}}}$")
+            lines.append(f"\\author{{{', '.join(author_names)}}}")
+            if affiliations:
+                inst_lines = [f"$^{{{aff.id}}}$ {aff.institution}" for aff in affiliations]
+                lines.append(f"\\institute{{{ ' \\\\ '.join(inst_lines) }}}")
             lines.append("\\maketitle\n")
             
         # Abstract
@@ -179,7 +209,7 @@ class LatexRenderer:
                 elif btype == "figure":
                     lines.append("\\begin{figure}[htbp]")
                     lines.append("  \\centering")
-                    fname = blk.get("image_filename") or "fig.png"
+                    fname = blk.get("image_filename") or "figure_1.png"
                     lines.append(f"  \\includegraphics[width=0.8\\linewidth]{{figures/{fname}}}")
                     lines.append(f"  \\caption{{{blk.get('caption', '')}}}")
                     if blk.get("label"):
