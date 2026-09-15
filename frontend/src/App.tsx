@@ -6,6 +6,7 @@ import { DestinationPanel } from './components/DestinationPanel';
 import { AnalysisView } from './components/AnalysisView';
 import { ReportView } from './components/ReportView';
 import { PdfPreviewModal } from './components/PdfPreviewModal';
+import { Footer } from './components/Footer';
 import { Play, Search, CheckCircle, RefreshCw, Loader2, FileCode } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -238,6 +239,8 @@ export const App: React.FC = () => {
           onClose={() => setShowPdfModal(false)}
         />
       )}
+
+      <Footer />
     </div>
   );
 };
