@@ -2,6 +2,7 @@ import os
 import uuid
 import shutil
 import tempfile
+import zipfile
 from typing import Optional
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,7 +36,14 @@ app.add_middleware(
 
 TEMP_STORAGE = os.path.join(tempfile.gettempdir(), "universal_converter_storage")
 os.makedirs(TEMP_STORAGE, exist_ok=True)
-SAMPLES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "samples"))
+
+# Locate samples directory robustly across local and Vercel serverless environments
+SAMPLES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "samples"))
+if not os.path.exists(SAMPLES_DIR):
+    SAMPLES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "samples"))
+if not os.path.exists(SAMPLES_DIR):
+    SAMPLES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "samples"))
+
 DIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist"))
 
 # Serve samples static directory
@@ -86,9 +94,14 @@ async def analyze_source(
     
     clean_filename = os.path.basename(file.filename) if file.filename else "manuscript.docx"
     file_path = os.path.join(job_dir, clean_filename)
-    await file.seek(0)
+    
+    # Read bytes asynchronously for Vercel ASGI serverless compatibility
+    content = await file.read()
+    if not content or len(content) == 0:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty (0 bytes).")
+        
     with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        buffer.write(content)
         
     tree = []
     warnings = []
@@ -96,6 +109,8 @@ async def analyze_source(
     
     try:
         if clean_filename.endswith(".zip"):
+            if not zipfile.is_zipfile(file_path):
+                raise HTTPException(status_code=400, detail="Uploaded file is not a valid ZIP archive.")
             extract_dir = os.path.join(job_dir, "extracted")
             rel_files, zip_warns = ZipGuard.inspect_and_extract_safe(file_path, extract_dir)
             warnings.extend(zip_warns)
@@ -140,14 +155,21 @@ async def analyze_template(
     
     clean_filename = os.path.basename(file.filename) if file.filename else "template.zip"
     file_path = os.path.join(job_dir, clean_filename)
-    await file.seek(0)
+    
+    # Read bytes asynchronously for Vercel ASGI serverless compatibility
+    content = await file.read()
+    if not content or len(content) == 0:
+        raise HTTPException(status_code=400, detail="Uploaded template file is empty (0 bytes).")
+        
     with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        buffer.write(content)
         
     tree = []
     target_extract_dir = job_dir
     try:
         if clean_filename.endswith(".zip"):
+            if not zipfile.is_zipfile(file_path):
+                raise HTTPException(status_code=400, detail="Uploaded template is not a valid ZIP archive.")
             target_extract_dir = os.path.join(job_dir, "extracted")
             _, zip_warns = ZipGuard.inspect_and_extract_safe(file_path, target_extract_dir)
             tree = build_directory_tree(target_extract_dir)
@@ -225,8 +247,7 @@ async def convert_document(job_id: str = Form(...)):
             output_pdf_path=output_pdf_path
         )
 
-    # Output UDM re-parse for integrity check
-    output_udm = udm # Content preservation
+    output_udm = udm
     integrity = IntegrityChecker.compare_integrity(udm, output_udm)
     validation_checks = TemplateValidator.validate_conformity(spec)
     
