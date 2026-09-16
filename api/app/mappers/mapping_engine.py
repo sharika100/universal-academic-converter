@@ -61,28 +61,34 @@ class MappingEngine:
                 
         # 3. Table Mapping
         mapped_tables = 0
-        for s_tbl in source_tables:
-            s_headers = s_tbl.get("headers", [])
-            s_rows = s_tbl.get("rows", [])
-            s_cols = len(s_headers) if s_headers else (len(s_rows[0]) if s_rows else 0)
-            
-            matched_tbl = False
-            for tpl_t in spec.template_tables:
-                t_cols = tpl_t.get("cols", 0)
-                if abs(s_cols - t_cols) <= 2:
-                    mapped_tables += 1
-                    matched_tbl = True
-                    break
-                    
-            if not matched_tbl:
-                unmapped_elements.append({
-                    "element_type": "table",
-                    "id": s_tbl.get("id"),
-                    "caption": s_tbl.get("caption"),
-                    "cols": s_cols,
-                    "rows": len(s_rows),
-                    "reason": "Target template lacks structurally compatible table grid"
-                })
+        tpl_tables = spec.template_tables if hasattr(spec, "template_tables") and spec.template_tables else []
+        
+        if not tpl_tables:
+            # Target template supports arbitrary table layouts natively
+            mapped_tables = total_tables
+        else:
+            for s_tbl in source_tables:
+                s_headers = s_tbl.get("headers", [])
+                s_rows = s_tbl.get("rows", [])
+                s_cols = len(s_headers) if s_headers else (len(s_rows[0]) if s_rows else 0)
+                
+                matched_tbl = False
+                for tpl_t in tpl_tables:
+                    t_cols = tpl_t.get("cols", 0)
+                    if abs(s_cols - t_cols) <= 2:
+                        mapped_tables += 1
+                        matched_tbl = True
+                        break
+                        
+                if not matched_tbl:
+                    unmapped_elements.append({
+                        "element_type": "table",
+                        "id": s_tbl.get("id"),
+                        "caption": s_tbl.get("caption"),
+                        "cols": s_cols,
+                        "rows": len(s_rows),
+                        "reason": "Target template lacks structurally compatible table grid"
+                    })
 
         # 4. Confidence & Compatibility Evaluation
         lv_score = 100.0 if total_label_values == 0 else round(min(100.0, (mapped_lv_count / max(1, total_label_values)) * 100.0), 1)
