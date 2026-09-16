@@ -312,11 +312,23 @@ class LatexParser:
                         raw_tab = tab_match.group(2)
                         raw_rows = [r.strip() for r in raw_tab.split(r'\\') if r.strip()]
                         for r_idx, r_str in enumerate(raw_rows):
-                            cells = [re.sub(r'\\[a-zA-Z]+', '', c).strip() for c in r_str.split('&')]
+                            cell_list = []
+                            for c in r_str.split('&'):
+                                c_str = c.strip()
+                                c_placeholders = []
+                                def protect_cell_cite(m):
+                                    c_placeholders.append(m.group(0))
+                                    return f"___CELL_CITE_{len(c_placeholders)-1}___"
+                                c_str = re.sub(r'\\cite[a-zA-Z]*(?:\[[^\]]*\])*\{[^}]+\}', protect_cell_cite, c_str)
+                                c_str = re.sub(r'\\[a-zA-Z]+\{([^}]+)\}', r'\1', c_str)
+                                c_str = re.sub(r'\\(?:textbf|textit|emph|hline|toprule|midrule|bottomrule)', '', c_str).strip()
+                                for c_idx, orig_c in enumerate(c_placeholders):
+                                    c_str = c_str.replace(f"___CELL_CITE_{c_idx}___", orig_c)
+                                cell_list.append(c_str)
                             if r_idx == 0:
-                                headers = cells
+                                headers = cell_list
                             else:
-                                rows.append(cells)
+                                rows.append(cell_list)
                                 
                     section_obj.blocks.append(Table(
                         id=f"tbl_{len(section_obj.blocks)+1}",
@@ -336,18 +348,35 @@ class LatexParser:
                         label=lbl_m.group(1) if lbl_m else None
                     ).model_dump())
                     
-                # Clean text paragraphs: STRIP \label{...} BEFORE macro stripping to prevent label keys from leaking as body text!
+                # Clean text paragraphs while preserving in-text citations (\cite, \citep, \citet), refs, and math
                 clean_p_text = re.sub(r'\\begin\{(?:figure|table|equation|align|strip)[*]?\}.*?\\end\{(?:figure|table|equation|align|strip)[*]?\}', '', text_block, flags=re.DOTALL)
                 clean_p_text = re.sub(r'\\includegraphics(?:\[[^\]]*\])?\{[^}]+\}', '', clean_p_text)
                 clean_p_text = re.sub(r'\\caption(?:of\{figure\})?\{[^}]+\}', '', clean_p_text)
                 clean_p_text = re.sub(r'\\label\{[^}]+\}', '', clean_p_text) # STRIP LABELS PREVENTING LEAK
-                clean_p_text = re.sub(r'\\(?:ref|cite|pageref)\{[^}]+\}', '', clean_p_text)
+                
+                # Protect citations, refs, and math using temporary placeholders
+                placeholders = []
+                def protect_macro(match):
+                    placeholders.append(match.group(0))
+                    return f"___MACRO_HOLDER_{len(placeholders)-1}___"
+                
+                # Protect \cite, \citep, \citet, \citeauthor, \citeyear, \citealt, \citealp
+                clean_p_text = re.sub(r'\\cite[a-zA-Z]*(?:\[[^\]]*\])*\{[^}]+\}', protect_macro, clean_p_text)
+                # Protect \ref, \pageref, \eqref
+                clean_p_text = re.sub(r'\\(?:ref|pageref|eqref)\{[^}]+\}', protect_macro, clean_p_text)
+                # Protect inline math ($...$)
+                clean_p_text = re.sub(r'\$[^$]+\$', protect_macro, clean_p_text)
+                
+                # Clean remaining formatting macros
                 clean_p_text = re.sub(r'\\[a-zA-Z]+\{([^}]+)\}', r'\1', clean_p_text)
-                clean_p_text = re.sub(r'\\[a-zA-Z]+', '', clean_p_text).strip()
+                clean_p_text = re.sub(r'\\(?:textbf|textit|emph|textrm|sf|tt|large|small|noindent)', '', clean_p_text).strip()
+                
+                # Restore protected citations, refs, and math
+                for p_idx, orig_macro in enumerate(placeholders):
+                    clean_p_text = clean_p_text.replace(f"___MACRO_HOLDER_{p_idx}___", orig_macro)
                 
                 paras = [p.strip() for p in clean_p_text.split("\n\n") if len(p.strip()) > 15]
                 for p in paras:
-                    # Filter out stray label strings like "sec:introduction"
                     if not re.match(r'^(?:sec|fig|tab|eq):[a-zA-Z0-9_-]+$', p.strip()):
                         section_obj.blocks.append(Paragraph(text=p).model_dump())
                     

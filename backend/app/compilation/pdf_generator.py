@@ -109,38 +109,46 @@ class PdfPreviewGenerator:
         tmp_img_files = []
         story = []
         
+        def safe_xml(s: str) -> str:
+            if not s:
+                return ""
+            s = str(s).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            s = s.replace('&lt;b&gt;', '<b>').replace('&lt;/b&gt;', '</b>')
+            s = s.replace('&lt;i&gt;', '<i>').replace('&lt;/i&gt;', '</i>')
+            return s
+
         # Title
-        story.append(Paragraph(udm.metadata.title, title_style))
+        story.append(Paragraph(safe_xml(udm.metadata.title), title_style))
         
         # Authors & Affiliations
         if udm.metadata.authors:
             names = ", ".join([a.name for a in udm.metadata.authors])
-            story.append(Paragraph(names, author_style))
+            story.append(Paragraph(safe_xml(names), author_style))
         if udm.metadata.affiliations:
             affs = "; ".join([aff.institution for aff in udm.metadata.affiliations])
-            story.append(Paragraph(affs, affil_style))
+            story.append(Paragraph(safe_xml(affs), affil_style))
             
         # Abstract
         if udm.metadata.abstract:
             story.append(Paragraph("Abstract", abs_h_style))
-            story.append(Paragraph(udm.metadata.abstract, abs_style))
+            story.append(Paragraph(safe_xml(udm.metadata.abstract), abs_style))
             
         # Keywords
         if udm.metadata.keywords:
-            kw_str = f"<b>Keywords:</b> {', '.join(udm.metadata.keywords)}"
+            kw_str = f"<b>Keywords:</b> {safe_xml(', '.join(udm.metadata.keywords))}"
             story.append(Paragraph(kw_str, body_style))
             story.append(Spacer(1, 10))
             
         # Sections
         for sec in udm.sections:
-            story.append(Paragraph(sec.title, h1_style))
+            story.append(Paragraph(safe_xml(sec.title), h1_style))
             
             for blk in sec.blocks:
                 btype = blk.get("type")
                 if btype == "paragraph":
-                    story.append(Paragraph(blk.get("text", ""), body_style))
+                    story.append(Paragraph(safe_xml(blk.get("text", "")), body_style))
                 elif btype == "equation":
-                    eq_str = f"<i>{blk.get('math_latex', '')}</i> &nbsp;&nbsp;&nbsp; ({blk.get('label', 'eq')})"
+                    eq_str = f"<i>{safe_xml(blk.get('math_latex', ''))}</i> &nbsp;&nbsp;&nbsp; ({safe_xml(str(blk.get('label', 'eq')))})"
                     story.append(Paragraph(eq_str, body_style))
                 elif btype == "figure":
                     b64_data = blk.get("image_data_b64")
