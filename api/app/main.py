@@ -54,6 +54,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def get_blob_read_write_token() -> Optional[str]:
+    token = os.environ.get("BLOB_READ_WRITE_TOKEN")
+    if token:
+        return token
+    for k, v in os.environ.items():
+        if (k.endswith("_READ_WRITE_TOKEN") or "BLOB" in k) and isinstance(v, str) and v.startswith("vercel_blob_"):
+            return v
+    return None
+
 @app.middleware("http")
 async def normalize_vercel_path(request, call_next):
     raw_path = request.scope.get("path", "")
@@ -103,7 +112,7 @@ INLINE_INDEX_HTML = """<!doctype html>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <script type="module" crossorigin src="/assets/index-Do0cX65l.js"></script>
+    <script type="module" crossorigin src="/assets/index-CczmXOzT.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-DdlYOea-.css">
   </head>
   <body>
@@ -130,10 +139,12 @@ class TemplateStorageAnalysisRequest(BaseModel):
 @app.get("/health")
 def health_check():
     """Health check endpoint to verify backend API reachability."""
+    blob_token_present = get_blob_read_write_token() is not None
     return {
         "status": "ok",
         "service": "universal-academic-converter",
-        "environment": "production"
+        "environment": "production",
+        "blob_storage_enabled": blob_token_present
     }
 
 @app.get("/api/presets")
@@ -203,7 +214,7 @@ async def analyze_source(
     project_summary = {}
     lower_filename = clean_filename.lower()
     
-    logger.info(f"[{ref_id}] [UPLOAD_INITIATED] Direct multipart source upload: {clean_filename} ({len(content)} bytes)")
+    logger.info(f"[{ref_id}] [UPLOAD_INITIATED] Direct multipart source upload for file: {clean_filename} ({len(content)} bytes)")
     
     try:
         if lower_filename.endswith(".zip"):
@@ -305,10 +316,10 @@ async def analyze_source_from_storage(req: StorageAnalysisRequest):
     clean_filename = os.path.basename(req.filename) if req.filename else "manuscript.zip"
     file_path = os.path.join(job_dir, clean_filename)
     
-    logger.info(f"[{ref_id}] [UPLOAD_INITIATED] Storage analysis initiated for job: {job_id}")
+    logger.info(f"[{ref_id}] [UPLOAD_INITIATED] Storage analysis requested for job: {job_id}")
     logger.info(f"[{ref_id}] [SOURCE_REFERENCE_RECEIVED] Received Blob reference for file '{clean_filename}'")
 
-    # 1. SSRF Check
+    # 1. SSRF Check: Validate URL origin
     url_lower = req.blob_url.lower()
     is_valid_url = url_lower.startswith("https://") or url_lower.startswith("http://127.0.0.1") or url_lower.startswith("http://localhost") or os.path.exists(req.blob_url)
     if not is_valid_url:
@@ -320,14 +331,14 @@ async def analyze_source_from_storage(req: StorageAnalysisRequest):
             ref_id=ref_id
         ))
         
-    # 2. Retrieve file content
+    # 2. Retrieve file content using server-side Vercel Blob token if present
     try:
         if os.path.exists(req.blob_url):
             with open(req.blob_url, "rb") as fh:
                 content = fh.read()
         else:
             headers = {}
-            token = os.environ.get("BLOB_READ_WRITE_TOKEN")
+            token = get_blob_read_write_token()
             if token:
                 headers["Authorization"] = f"Bearer {token}"
             resp = requests.get(req.blob_url, headers=headers, timeout=60)
@@ -359,7 +370,7 @@ async def analyze_source_from_storage(req: StorageAnalysisRequest):
             ref_id=ref_id
         ))
 
-    # 3. Hash verification
+    # 3. Server-side SHA-256 Hash Verification
     downloaded_hash = hashlib.sha256(content).hexdigest()
     if req.sha256 and downloaded_hash.lower() != req.sha256.lower():
         logger.error(f"[{ref_id}] Hash mismatch! Expected {req.sha256}, got {downloaded_hash}")
@@ -572,7 +583,7 @@ async def analyze_template_from_storage(req: TemplateStorageAnalysisRequest):
                 content = fh.read()
         else:
             headers = {}
-            token = os.environ.get("BLOB_READ_WRITE_TOKEN")
+            token = get_blob_read_write_token()
             if token:
                 headers["Authorization"] = f"Bearer {token}"
             resp = requests.get(req.blob_url, headers=headers, timeout=60)
