@@ -103,7 +103,7 @@ INLINE_INDEX_HTML = """<!doctype html>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <script type="module" crossorigin src="/assets/index-CVNMYTBg.js"></script>
+    <script type="module" crossorigin src="/assets/index-Do0cX65l.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-DdlYOea-.css">
   </head>
   <body>
@@ -203,7 +203,7 @@ async def analyze_source(
     project_summary = {}
     lower_filename = clean_filename.lower()
     
-    logger.info(f"[{ref_id}] Analyzing Source Manuscript: {clean_filename} ({len(content)} bytes)")
+    logger.info(f"[{ref_id}] [UPLOAD_INITIATED] Direct multipart source upload: {clean_filename} ({len(content)} bytes)")
     
     try:
         if lower_filename.endswith(".zip"):
@@ -222,7 +222,9 @@ async def analyze_source(
             project_summary = summarize_latex_project(extract_dir)
             _, candidates, all_tex = find_latex_entrypoint(extract_dir)
             if all_tex:
+                logger.info(f"[{ref_id}] [SOURCE_PROJECT_ANALYSIS_STARTED] Analyzing LaTeX project ZIP: {clean_filename}")
                 udm = LatexParser.parse_project(extract_dir, selected_entrypoint=selected_entrypoint)
+                logger.info(f"[{ref_id}] [SOURCE_PROJECT_ANALYSIS_COMPLETED] LaTeX project analysis completed for: {clean_filename}")
             else:
                 docx_files = [os.path.join(root, f) for root, _, files in os.walk(extract_dir) for f in files if f.lower().endswith(".docx")]
                 if docx_files:
@@ -303,6 +305,9 @@ async def analyze_source_from_storage(req: StorageAnalysisRequest):
     clean_filename = os.path.basename(req.filename) if req.filename else "manuscript.zip"
     file_path = os.path.join(job_dir, clean_filename)
     
+    logger.info(f"[{ref_id}] [UPLOAD_INITIATED] Storage analysis initiated for job: {job_id}")
+    logger.info(f"[{ref_id}] [SOURCE_REFERENCE_RECEIVED] Received Blob reference for file '{clean_filename}'")
+
     # 1. SSRF Check
     url_lower = req.blob_url.lower()
     is_valid_url = url_lower.startswith("https://") or url_lower.startswith("http://127.0.0.1") or url_lower.startswith("http://localhost") or os.path.exists(req.blob_url)
@@ -335,6 +340,7 @@ async def analyze_source_from_storage(req: StorageAnalysisRequest):
                     ref_id=ref_id
                 ))
             content = resp.content
+            logger.info(f"[{ref_id}] [SOURCE_BLOB_RETRIEVED] Retrieved Blob payload from storage ({len(content)} bytes)")
     except Exception as e:
         return JSONResponse(status_code=400, content=create_error_payload(
             stage="source_analysis",
@@ -364,6 +370,7 @@ async def analyze_source_from_storage(req: StorageAnalysisRequest):
             detail=f"Expected SHA-256: {req.sha256}, Computed SHA-256: {downloaded_hash}",
             ref_id=ref_id
         ))
+    logger.info(f"[{ref_id}] [SOURCE_HASH_VERIFIED] SHA-256 integrity hash verified: {downloaded_hash}")
 
     with open(file_path, "wb") as buffer:
         buffer.write(content)
@@ -373,8 +380,6 @@ async def analyze_source_from_storage(req: StorageAnalysisRequest):
     candidates = []
     project_summary = {}
     lower_filename = clean_filename.lower()
-    
-    logger.info(f"[{ref_id}] Analyzing Source Manuscript from Storage: {clean_filename} ({len(content)} bytes)")
     
     try:
         if lower_filename.endswith(".zip"):
@@ -393,7 +398,9 @@ async def analyze_source_from_storage(req: StorageAnalysisRequest):
             project_summary = summarize_latex_project(extract_dir)
             _, candidates, all_tex = find_latex_entrypoint(extract_dir)
             if all_tex:
+                logger.info(f"[{ref_id}] [SOURCE_PROJECT_ANALYSIS_STARTED] Parsing retrieved LaTeX project ZIP: {clean_filename}")
                 udm = LatexParser.parse_project(extract_dir, selected_entrypoint=req.selected_entrypoint)
+                logger.info(f"[{ref_id}] [SOURCE_PROJECT_ANALYSIS_COMPLETED] LaTeX project analysis completed for: {clean_filename}")
             else:
                 docx_files = [os.path.join(root, f) for root, _, files in os.walk(extract_dir) for f in files if f.lower().endswith(".docx")]
                 if docx_files:

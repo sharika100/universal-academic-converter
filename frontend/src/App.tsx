@@ -13,10 +13,10 @@ import { ResponsibleUseModal } from './components/ResponsibleUseModal';
 import { ErrorPanel, APIErrorState } from './components/ErrorPanel';
 import { DebugPanel } from './components/DebugPanel';
 import { Footer } from './components/Footer';
-import { Play, Search, Loader2, ShieldCheck, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { Play, Search, Loader2, ShieldCheck, ShieldAlert } from 'lucide-react';
 
 const PROGRESS_STEPS = [
-  "1. Uploading source project...",
+  "1. Uploading source project to private storage...",
   "2. Extracting & validating project archives...",
   "3. Analyzing LaTeX source manuscript & entrypoints...",
   "4. Analyzing destination template package...",
@@ -149,16 +149,16 @@ export const App: React.FC = () => {
     setApiError(null);
 
     try {
-      const LARGE_FILE_THRESHOLD = 3.5 * 1024 * 1024; // 3.5 MB threshold below Vercel 4.5 MB function limit
+      const LARGE_FILE_THRESHOLD = 3.5 * 1024 * 1024; // 3.5 MB threshold strictly below Vercel 4.5 MB limit
       let srcRes: Response;
 
       // 1. Analyze Source
       if (sourceFile.size > LARGE_FILE_THRESHOLD) {
-        console.log(`Source file size (${(sourceFile.size / 1024 / 1024).toFixed(2)} MB) exceeds standard multipart threshold. Routing via Direct Storage Upload...`);
+        console.log(`Source file size (${(sourceFile.size / 1024 / 1024).toFixed(2)} MB) exceeds 3.5 MB threshold. Uploading directly to Private Vercel Blob Storage...`);
         try {
           const srcHash = await calculateSHA256(sourceFile);
           const blob = await upload(sourceFile.name, sourceFile, {
-            access: 'public',
+            access: 'private',
             handleUploadUrl: '/api/upload-token',
           });
 
@@ -176,14 +176,19 @@ export const App: React.FC = () => {
             })
           });
         } catch (uploadErr: any) {
-          console.warn("Direct storage upload fallback to POST /api/analyze-source:", uploadErr);
-          setActiveEndpoint('/api/analyze-source');
-          const srcData = new FormData();
-          srcData.append('file', sourceFile);
-          if (overrideEntrypoint || selectedEntrypoint) {
-            srcData.append('selected_entrypoint', overrideEntrypoint || selectedEntrypoint);
-          }
-          srcRes = await fetch('/api/analyze-source', { method: 'POST', body: srcData });
+          console.error("Direct Vercel Blob upload failed:", uploadErr);
+          // DO NOT fall back to sending large file to POST /api/analyze-source!
+          setApiError({
+            stage: 'source_analysis',
+            error_code: 'LATEX_PROJECT_UPLOAD_ERROR',
+            message: `Source project upload failed: file size (${(sourceFile.size / 1024 / 1024).toFixed(2)} MB) exceeds Vercel Function 4.5 MB payload limit.`,
+            detail: uploadErr.message?.includes('No token found') || uploadErr.message?.includes('BLOB_READ_WRITE_TOKEN') || uploadErr.message?.includes('token')
+              ? 'Vercel Blob Storage is not configured. Please add BLOB_READ_WRITE_TOKEN to your Vercel Environment Variables.'
+              : `Vercel Blob direct upload failed: ${uploadErr.message || 'Check storage token and network connection.'}`,
+            reference_id: `REF-BLOB-${Date.now().toString(36).toUpperCase()}`
+          });
+          setAnalyzing(false);
+          return;
         }
       } else {
         setActiveEndpoint('/api/analyze-source');
@@ -246,7 +251,7 @@ export const App: React.FC = () => {
         try {
           const destHash = await calculateSHA256(destFile);
           const blob = await upload(destFile.name, destFile, {
-            access: 'public',
+            access: 'private',
             handleUploadUrl: '/api/upload-token',
           });
 
@@ -262,12 +267,16 @@ export const App: React.FC = () => {
             })
           });
         } catch (destUploadErr: any) {
-          console.warn("Direct storage template upload fallback to POST /api/analyze-template:", destUploadErr);
-          setActiveEndpoint('/api/analyze-template');
-          const destData = new FormData();
-          destData.append('file', destFile);
-          destData.append('job_id', srcJson.job_id);
-          destRes = await fetch('/api/analyze-template', { method: 'POST', body: destData });
+          console.error("Direct storage template upload failed:", destUploadErr);
+          setApiError({
+            stage: 'template_analysis',
+            error_code: 'TEMPLATE_UPLOAD_ERROR',
+            message: `Template upload failed: file size (${(destFile.size / 1024 / 1024).toFixed(2)} MB) exceeds Vercel Function limit.`,
+            detail: destUploadErr.message || 'Blob storage upload error.',
+            reference_id: `REF-DEST-BLOB-${Date.now().toString(36).toUpperCase()}`
+          });
+          setAnalyzing(false);
+          return;
         }
       } else {
         setActiveEndpoint('/api/analyze-template');
@@ -287,7 +296,7 @@ export const App: React.FC = () => {
           const text = await destRes.text().catch(() => '');
           errorData = {
             stage: 'template_analysis',
-            error_code: destRes.status === 413 ? 'TEMPLATE_ANALYSIS_ERROR' : (destRes.status === 404 ? 'ENDPOINT_NOT_FOUND' : 'TEMPLATE_ANALYSIS_ERROR'),
+            error_code: destRes.status === 413 ? 'TEMPLATE_UPLOAD_ERROR' : (destRes.status === 404 ? 'ENDPOINT_NOT_FOUND' : 'TEMPLATE_ANALYSIS_ERROR'),
             message: destRes.status === 404
               ? 'Destination template analysis endpoint (/api/analyze-template) was not found on the server.'
               : `Server returned HTTP ${destRes.status} error during template analysis.`,
@@ -597,7 +606,7 @@ export const App: React.FC = () => {
       {(analyzing || converting) && (
         <div style={{ background: '#111827', border: '1px solid #1F2937', borderRadius: '12px', padding: '20px', marginBottom: '32px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px', fontSize: '0.9rem', color: '#F8FAFC', fontWeight: 600 }}>
-            <span>{converting ? PROGRESS_STEPS[progressStep] : "Analyzing manuscript & destination template syntax..."}</span>
+            <span>{converting ? PROGRESS_STEPS[progressStep] : (sourceFile && sourceFile.size > 3.5 * 1024 * 1024 ? "Uploading project to private storage & analyzing..." : "Analyzing manuscript & destination template syntax...")}</span>
             <span>{converting ? `${Math.round(((progressStep + 1) / PROGRESS_STEPS.length) * 100)}%` : "Processing..."}</span>
           </div>
           <div style={{ width: '100%', height: '8px', background: '#1E293B', borderRadius: '4px', overflow: 'hidden' }}>
