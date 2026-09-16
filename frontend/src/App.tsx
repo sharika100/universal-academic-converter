@@ -175,6 +175,10 @@ export const App: React.FC = () => {
 
           const authData = await authRes.json();
           let finalBlobUrl = authData.blobUrl;
+          let finalPathname = authData.pathname;
+
+          console.log(`[BLOB_PUT_START] Initiating PUT upload to signed URL.`);
+          console.log(`[BLOB_PUT_DETAILS] file.name: "${sourceFile.name}", file.size: ${sourceFile.size}, pathname: "${authData.pathname}"`);
 
           if (authData.uploadUrl) {
             console.log("Directly uploading source manuscript payload to Vercel Blob signed URL...");
@@ -186,15 +190,35 @@ export const App: React.FC = () => {
               body: sourceFile
             });
 
-            if (!putRes.ok) {
-              throw new Error(`Direct Blob storage upload failed with HTTP status ${putRes.status}`);
+            console.log(`[BLOB_PUT_RESPONSE] HTTP status: ${putRes.status}, response.ok: ${putRes.ok}`);
+            let putResText = '';
+            let putData: any = null;
+            try {
+              putResText = await putRes.text();
+              console.log(`[BLOB_PUT_RESPONSE_TEXT] ${putResText.slice(0, 500)}`);
+              putData = JSON.parse(putResText);
+            } catch (e) {
+              // Not JSON
             }
+
+            if (!putRes.ok) {
+              throw new Error(`Direct Blob storage upload failed (HTTP status ${putRes.status}): ${putResText || 'Storage PUT rejected'}`);
+            }
+
+            if (putData?.url) {
+              finalBlobUrl = putData.url;
+            }
+            if (putData?.pathname) {
+              finalPathname = putData.pathname;
+            }
+            console.log(`[BLOB_PUT_SUCCESS] Uploaded to Vercel Blob. Pathname: "${finalPathname}", URL: "${finalBlobUrl}"`);
           } else {
             const blob = await upload(sourceFile.name, sourceFile, {
               access: 'private',
               handleUploadUrl: '/api/upload-token',
             });
             finalBlobUrl = blob.url;
+            finalPathname = blob.pathname;
           }
 
           setActiveEndpoint('/api/analyze-source-from-storage');
@@ -205,7 +229,7 @@ export const App: React.FC = () => {
               upload_id: `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
               blob_url: finalBlobUrl,
               download_url: authData.downloadUrl,
-              pathname: authData.pathname,
+              pathname: finalPathname,
               filename: sourceFile.name,
               sha256: srcHash,
               selected_entrypoint: overrideEntrypoint || selectedEntrypoint,

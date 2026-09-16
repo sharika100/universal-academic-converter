@@ -86,7 +86,11 @@ export const ErrorPanel: React.FC<ErrorPanelProps> = ({ error, onDismiss }) => {
 
       <div style={{ marginTop: '14px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: '#A5B4FC' }}>
         <HelpCircle size={15} />
-        <span>Suggested action: Verify your document format and file integrity, then re-upload.</span>
+        <span>
+          {['STORAGE_OBJECT_NOT_FOUND', 'STORAGE_CONFIGURATION_ERROR', 'LATEX_PROJECT_UPLOAD_ERROR', 'STORAGE_SECURITY_ERROR'].includes(error.error_code)
+            ? 'Suggested action: Secure storage could not retrieve the uploaded project. Please retry the upload. If the problem persists, contact support with the Reference ID.'
+            : 'Suggested action: Verify your document format and file integrity, then re-upload.'}
+        </span>
       </div>
     </div>
   );
