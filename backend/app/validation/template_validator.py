@@ -145,4 +145,36 @@ class TemplateValidator:
         if orphan_items > 0:
             errors.append(f"Validation Failure: {orphan_items} orphan \\item command(s) detected outside list environments.")
 
+        # 16. Check for (None) or None leakage
+        none_leaks = re.findall(r'\((?:None|null|undefined)\)', main_content)
+        if none_leaks:
+            errors.append(f"Validation Failure: Literal (None)/null string leakage detected: {none_leaks[:3]}")
+
+        # 17. Check Algorithm balance (\For..\EndFor, \If..\EndIf, \While..\EndWhile)
+        fors_cnt = len(re.findall(r'\\For\{', main_content))
+        endfors_cnt = len(re.findall(r'\\EndFor\b', main_content))
+        ifs_cnt = len(re.findall(r'\\If\{', main_content))
+        endifs_cnt = len(re.findall(r'\\EndIf\b', main_content))
+        whiles_cnt = len(re.findall(r'\\While\{', main_content))
+        endwhiles_cnt = len(re.findall(r'\\EndWhile\b', main_content))
+
+        if fors_cnt != endfors_cnt:
+            errors.append(f"Validation Failure: Mismatched \\For ({fors_cnt}) and \\EndFor ({endfors_cnt}) constructs.")
+        if ifs_cnt != endifs_cnt:
+            errors.append(f"Validation Failure: Mismatched \\If ({ifs_cnt}) and \\EndIf ({endifs_cnt}) constructs.")
+        if whiles_cnt != endwhiles_cnt:
+            errors.append(f"Validation Failure: Mismatched \\While ({whiles_cnt}) and \\EndWhile ({endwhiles_cnt}) constructs.")
+
+        # 18. Check for bare algorithm control text outside algorithm environments
+        alg_lines_leak = re.findall(r'^\s*each\s+(?:aspect|candidate|recommended)\b.*$', main_content, re.MULTILINE)
+        if alg_lines_leak:
+            errors.append(f"Validation Failure: Unwrapped algorithm control line leak detected: {alg_lines_leak[:2]}")
+
+        # 19. Check Figure Reference Resolution (\ref{fig:X} -> \label{fig:X})
+        all_fig_refs = set(re.findall(r'\\ref\{(fig:[^}]+)\}', main_content))
+        all_fig_labels = set(re.findall(r'\\label\{(fig:[^}]+)\}', main_content))
+        unresolved_fig_refs = [r for r in all_fig_refs if r not in all_fig_labels]
+        if unresolved_fig_refs:
+            errors.append(f"Validation Failure: Unresolved figure reference(s) detected: {unresolved_fig_refs}")
+
         return len(errors) == 0, errors

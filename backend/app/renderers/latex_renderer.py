@@ -56,24 +56,24 @@ class LatexRenderer:
             for blk in sec.blocks:
                 btype = blk.get("type")
                 if btype in ["figure", "equation"]:
-                    b64_data = blk.get("image_data_b64")
-                    raw_fname = blk.get("image_filename")
-                    
-                    if b64_data:
-                        if not raw_fname or raw_fname in written_fig_names or raw_fname == "fig.png":
-                            raw_fname = f"figure_{fig_idx}.png"
-                            blk["image_filename"] = raw_fname
-                            
-                        written_fig_names.add(raw_fname)
-                        fig_idx += 1
-                        
-                        try:
-                            img_path = os.path.join(fig_dir, raw_fname)
-                            with open(img_path, "wb") as fh:
-                                fh.write(base64.b64decode(b64_data))
-                            created_files.append(f"figures/{raw_fname}")
-                        except Exception:
-                            pass
+                    sub_imgs = blk.get("sub_images", [])
+                    img_items = sub_imgs if sub_imgs else [blk]
+                    for sub_item in img_items:
+                        b64_data = sub_item.get("image_data_b64")
+                        raw_fname = sub_item.get("image_filename")
+                        if b64_data:
+                            if not raw_fname or raw_fname in written_fig_names or raw_fname == "fig.png":
+                                raw_fname = f"figure_{fig_idx}.png"
+                                sub_item["image_filename"] = raw_fname
+                            written_fig_names.add(raw_fname)
+                            fig_idx += 1
+                            try:
+                                img_path = os.path.join(fig_dir, raw_fname)
+                                with open(img_path, "wb") as fh:
+                                    fh.write(base64.b64decode(b64_data))
+                                created_files.append(f"figures/{raw_fname}")
+                            except Exception:
+                                pass
                             
         # 3. Generate target references.bib
         bib_path = os.path.join(output_dir, "references.bib")
@@ -167,6 +167,9 @@ class LatexRenderer:
             lines.append("\\usepackage{amsmath,amssymb}")
             lines.append("\\usepackage{booktabs}")
             lines.append("\\usepackage{url}")
+            lines.append("\\usepackage{algorithm}")
+            lines.append("\\usepackage{algorithmicx}")
+            lines.append("\\usepackage{algpseudocode}")
             if spec.citation_system == "natbib":
                 lines.append("\\usepackage{natbib}")
             lines.append("\n\\begin{document}\n")
@@ -240,7 +243,7 @@ class LatexRenderer:
             
         # Sections
         for sec in udm.sections:
-            cmd = "\\section" if sec.level == 1 else ("\\subsection" if sec.level == 2 else "\\subsubsection")
+            cmd = "\\section" if sec.level == 1 else ("\\subsection" if sec.level == 2 else ("\\subsubsection" if sec.level == 3 else "\\paragraph"))
             lines.append(f"{cmd}{{{sec.title}}}")
             if hasattr(sec, 'label') and sec.label:
                 lines.append(f"\\label{{{sec.label}}}")
@@ -267,11 +270,31 @@ class LatexRenderer:
                         if blk.get("label"):
                             lines.append(f"  \\label{{{blk.get('label')}}}")
                         lines.append("\\end{equation}\n")
+                elif btype == "algorithm":
+                    lines.append("\\begin{algorithm}[htbp]")
+                    if blk.get("caption"):
+                        lines.append(f"  \\caption{{{blk.get('caption')}}}")
+                    if blk.get("label"):
+                        lines.append(f"  \\label{{{blk.get('label')}}}")
+                    lines.append("  \\begin{algorithmic}[1]")
+                    lines.append(f"  {blk.get('code', '').strip()}")
+                    lines.append("  \\end{algorithmic}")
+                    lines.append("\\end{algorithm}\n")
                 elif btype == "figure":
                     lines.append("\\begin{figure}[htbp]")
                     lines.append("  \\centering")
-                    fname = blk.get("image_filename") or "figure_1.png"
-                    lines.append(f"  \\includegraphics[width=0.8\\linewidth]{{figures/{fname}}}")
+                    sub_imgs = blk.get("sub_images", [])
+                    if sub_imgs:
+                        for s_idx, s_img in enumerate(sub_imgs):
+                            fname = s_img.get("image_filename")
+                            lines.append(f"  \\begin{{minipage}}{{0.48\\linewidth}}")
+                            lines.append(f"    \\centering")
+                            lines.append(f"    \\includegraphics[width=\\linewidth]{{figures/{fname}}}")
+                            lines.append(f"  \\end{{minipage}}\\hfill")
+                        lines.append("")
+                    else:
+                        fname = blk.get("image_filename") or "figure_1.png"
+                        lines.append(f"  \\includegraphics[width=0.8\\linewidth]{{figures/{fname}}}")
                     if blk.get("caption"):
                         lines.append(f"  \\caption{{{blk.get('caption')}}}")
                     if blk.get("label"):

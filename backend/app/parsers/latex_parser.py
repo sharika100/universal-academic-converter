@@ -254,53 +254,97 @@ class LatexParser:
         content = re.sub(r'\\begin\{bio(?:graphy)?\}.*?\\end\{bio(?:graphy)?\}', '', content, flags=re.DOTALL)
         content = re.sub(r'\\bio(?:\[[^\]]*\])?\{[^}]*\}.*?(?=\\endbio|\\section|\Z)', '', content, flags=re.DOTALL)
         
-        # Split content by \section
-        raw_sections = re.split(r'\\section\*?\{([^}]+)\}', content)
+        # Extract all heading locations (\section, \subsection, \subsubsection, \paragraph)
+        heading_pattern = re.compile(r'\\(section|subsection|subsubsection|paragraph)\*?\s*\{([^}]+)\}')
+        matches = list(heading_pattern.finditer(content))
         
-        for i in range(1, len(raw_sections), 2):
-            sec_title = raw_sections[i].strip()
-            sec_body = raw_sections[i+1] if i+1 < len(raw_sections) else ""
-            
-            # Extract section label if present at start of sec_body
-            sec_lbl_m = re.match(r'\s*\\label\{([^}]+)\}', sec_body)
-            sec_label = sec_lbl_m.group(1) if sec_lbl_m else None
-            
-            section_obj = Section(title=sec_title, level=1, label=sec_label, blocks=[])
-            
-            # Subsections
-            subsections = re.split(r'\\subsection\*?\{([^}]+)\}', sec_body)
-            
-            for j in range(0, len(subsections)):
-                if j == 0:
-                    text_block = subsections[j]
-                else:
-                    if j % 2 == 1:
-                        sub_title = subsections[j]
-                        sub_body = subsections[j+1] if j+1 < len(subsections) else ""
-                        text_block = f"\\subsection{{{sub_title}}}\n" + sub_body
-                    else:
-                        continue
-                        
-                block_list = []
+        if not matches:
+            chunks = [(Section(title="Document", level=1, blocks=[]), content)]
+        else:
+            chunks = []
+            if matches[0].start() > 0:
+                pre_text = content[:matches[0].start()].strip()
+                if pre_text:
+                    chunks.append((Section(title="Preamble", level=1, blocks=[]), pre_text))
+                    
+            for idx, m in enumerate(matches):
+                cmd_type, h_title = m.group(1), m.group(2).strip()
+                start_p = m.end()
+                end_p = matches[idx+1].start() if idx + 1 < len(matches) else len(content)
+                sec_text = content[start_p:end_p]
                 
-                # Extract figures (\includegraphics)
-                img_matches = re.finditer(r'\\includegraphics(?:\[([^\]]*)\])?\{([^}]+)\}', text_block)
-                for m in img_matches:
-                    img_path = m.group(2).strip()
-                    pos = m.start()
-                    surrounding = text_block[max(0, pos-300):min(len(text_block), pos+400)]
+                lbl_m = re.match(r'\s*\\label\{([^}]+)\}', sec_text)
+                sec_label = lbl_m.group(1) if lbl_m else None
+                if sec_label:
+                    sec_text = sec_text[lbl_m.end():]
                     
-                    cap_m = re.search(r'\\caption(?:of\{figure\})?\{([^}]+)\}', surrounding)
-                    lbl_m = re.search(r'\\label\{([^}]+)\}', surrounding)
+                level_map = {"section": 1, "subsection": 2, "subsubsection": 3, "paragraph": 4}
+                lvl = level_map.get(cmd_type, 1)
+                
+                chunks.append((Section(title=h_title, level=lvl, label=sec_label, blocks=[]), sec_text))
+                
+        for section_obj, text_block in chunks:
+            block_list = []
+            extracted_spans = []
+            
+            # 1. Extract Algorithms (\begin{algorithm}...\end{algorithm} or \begin{algorithmic}...\end{algorithmic})
+            alg_matches = re.finditer(r'\\begin\{(?:algorithm|algorithmic)[*]?\}(.*?)\\end\{(?:algorithm|algorithmic)[*]?\}', text_block, re.DOTALL)
+            for am in alg_matches:
+                alg_str = am.group(1)
+                pos = am.start()
+                extracted_spans.append((am.start(), am.end()))
+                
+                cap_m = re.search(r'\\caption\{([^}]+)\}', alg_str)
+                lbl_m = re.search(r'\\label\{([^}]+)\}', alg_str)
+                code_m = re.search(r'\\begin\{algorithmic\}(?:\[\d+\])?(.*?)\\end\{algorithmic\}', alg_str, re.DOTALL)
+                
+                caption = cap_m.group(1).strip() if cap_m else ""
+                label = lbl_m.group(1).strip() if lbl_m else None
+                code = code_m.group(1).strip() if code_m else alg_str.strip()
+                
+                alg_dict = {
+                    "type": "algorithm",
+                    "id": f"alg_{len(section_obj.blocks)+len(block_list)+1}",
+                    "caption": caption,
+                    "label": label,
+                    "code": code,
+                    "_pos": pos
+                }
+                block_list.append(alg_dict)
+                
+            # 2. Extract Figure Blocks & Multi-Image Groups (\begin{figure}, \begin{center}, \begin{strip})
+            fig_env_matches = re.finditer(r'\\begin\{(?:figure|center|strip)[*]?\}(.*?)\\end\{(?:figure|center|strip)[*]?\}', text_block, re.DOTALL)
+            for fm in fig_env_matches:
+                f_str = fm.group(1)
+                pos = fm.start()
+                
+                imgs = re.findall(r'\\includegraphics(?:\[([^\]]*)\])?\{([^}]+)\}', f_str)
+                if not imgs:
+                    continue
                     
-                    caption = cap_m.group(1).strip() if cap_m else ""
-                    label = lbl_m.group(1).strip() if lbl_m else None
+                extracted_spans.append((fm.start(), fm.end()))
+                
+                cap_m = re.search(r'\\caption(?:of\{figure\})?\{([^}]+)\}', f_str)
+                lbl_m = re.search(r'\\label\{([^}]+)\}', f_str)
+                
+                if not cap_m:
+                    font_cap = re.search(r'\{\\footnotesize\s*\\textbf\{Fig\.\}?\s*([^}]+)\}', f_str)
+                    caption = font_cap.group(1).strip() if font_cap else ""
+                else:
+                    caption = cap_m.group(1).strip()
                     
+                label = lbl_m.group(1).strip() if lbl_m else None
+                after_snippet = text_block[fm.end():min(len(text_block), fm.end()+250)]
+                if not label:
+                    ref_m = re.search(r'\\ref\{([^}]+)\}', after_snippet)
+                    if ref_m:
+                        label = ref_m.group(1).strip()
+                        
+                if len(imgs) == 1:
+                    img_path = imgs[0][1].strip()
                     found_p, b64_str = LatexParser._load_image_b64(base_dir, img_path)
-                    
-                    fig_id = f"fig_{len(section_obj.blocks)+len(block_list)+1}"
                     fig_dict = Figure(
-                        id=fig_id,
+                        id=f"fig_{len(section_obj.blocks)+len(block_list)+1}",
                         caption=caption,
                         label=label,
                         image_filename=os.path.basename(found_p or img_path),
@@ -309,154 +353,209 @@ class LatexParser:
                     ).model_dump()
                     fig_dict["_pos"] = pos
                     block_list.append(fig_dict)
-                    
-                # Extract tables
-                tbl_matches = re.finditer(r'\\begin\{table[*]?\}(.*?)\\end\{table[*]?\}', text_block, re.DOTALL)
-                for tm in tbl_matches:
-                    tbl_str = tm.group(1)
-                    pos = tm.start()
-                    cap_match = re.search(r'\\caption\{([^}]+)\}', tbl_str)
-                    lbl_match = re.search(r'\\label\{([^}]+)\}', tbl_str)
-                    caption = cap_match.group(1).strip() if cap_match else ""
-                    
-                    tab_match = re.search(r'\\begin\{tabular\}\s*\{((?:[^{}]|\{[^{}]*\})+)\}(.*?)\\end\{tabular\}', tbl_str, re.DOTALL)
-                    rows = []
-                    headers = []
-                    col_spec = None
-                    if tab_match:
-                        col_spec = tab_match.group(1).strip()
-                        raw_tab = tab_match.group(2)
-                        raw_rows = [r.strip() for r in re.split(r'\\\\', raw_tab) if r.strip()]
-                        for r_idx, r_str in enumerate(raw_rows):
-                            cell_list = []
-                            for c in r_str.split('&'):
-                                c_str = c.strip()
-                                c_placeholders = []
-                                def protect_cell_cite(m_c):
-                                    c_placeholders.append(m_c.group(0))
-                                    return f"___CELL_CITE_{len(c_placeholders)-1}___"
-                                c_str = re.sub(r'\\cite[a-zA-Z]*(?:\[[^\]]*\])*\{[^}]+\}', protect_cell_cite, c_str)
-                                c_str = re.sub(r'\\(?!begin\b|end\b)[a-zA-Z]+\{([^}]+)\}', r'\1', c_str)
-                                c_str = re.sub(r'\\(?:textbf|textit|emph|hline|toprule|midrule|bottomrule)', '', c_str).strip()
-                                for c_idx in range(len(c_placeholders) - 1, -1, -1):
-                                    c_str = c_str.replace(f"___CELL_CITE_{c_idx}___", c_placeholders[c_idx])
-                                cell_list.append(c_str)
-                            if r_idx == 0:
-                                headers = cell_list
-                            else:
-                                rows.append(cell_list)
-                                
-                    tbl_dict = Table(
-                        id=f"tbl_{len(section_obj.blocks)+len(block_list)+1}",
-                        caption=caption,
-                        label=lbl_match.group(1) if lbl_match else None,
-                        col_spec=col_spec,
-                        headers=headers,
-                        rows=rows
-                    ).model_dump()
-                    tbl_dict["_pos"] = pos
-                    block_list.append(tbl_dict)
-                    
-                # Extract Equations
-                eq_matches = re.finditer(r'\\begin\{(?:equation|align)[*]?\}(.*?)\\end\{(?:equation|align)[*]?\}', text_block, re.DOTALL)
-                for em in eq_matches:
-                    eq_str = em.group(1)
-                    pos = em.start()
-                    lbl_m = re.search(r'\\label\{([^}]+)\}', eq_str)
-                    clean_eq = re.sub(r'\\label\{[^}]+\}', '', eq_str).strip()
-                    eq_dict = Equation(
-                        math_latex=clean_eq,
-                        label=lbl_m.group(1) if lbl_m else None
-                    ).model_dump()
-                    eq_dict["_pos"] = pos
-                    block_list.append(eq_dict)
-                    
-                # Extract Lists (\begin{itemize}...\end{itemize} and \begin{enumerate}...\end{enumerate})
-                list_matches = re.finditer(r'\\begin\{(itemize|enumerate)\}(.*?)\\end\{\1\}', text_block, re.DOTALL)
-                for lm in list_matches:
-                    env_type = lm.group(1)
-                    list_body = lm.group(2)
-                    pos = lm.start()
-                    is_ordered = (env_type == "enumerate")
-                    
-                    raw_items = re.findall(r'\\item\s*(.*?)(?=\\item|\Z)', list_body, re.DOTALL)
-                    items = []
-                    for raw_i in raw_items:
-                        clean_i = raw_i.strip()
-                        if clean_i:
-                            i_placeholders = []
-                            def protect_item_macro(match):
-                                i_placeholders.append(match.group(0))
-                                return f"___ITEM_MACRO_{len(i_placeholders)-1}___"
-                            clean_i = re.sub(r'\\cite[a-zA-Z]*(?:\[[^\]]*\])*\{[^}]+\}', protect_item_macro, clean_i)
-                            clean_i = re.sub(r'\\(?:ref|pageref|eqref)\{[^}]+\}', protect_item_macro, clean_i)
-                            clean_i = re.sub(r'\$[^$]+\$', protect_item_macro, clean_i)
-                            
-                            clean_i = re.sub(r'\\(?!begin\b|end\b)[a-zA-Z]+\{([^}]+)\}', r'\1', clean_i)
-                            clean_i = re.sub(r'\\(?:textbf|textit|emph|textrm|sf|tt|large|small|noindent)', '', clean_i).strip()
-                            
-                            for p_idx in range(len(i_placeholders) - 1, -1, -1):
-                                clean_i = clean_i.replace(f"___ITEM_MACRO_{p_idx}___", i_placeholders[p_idx])
-                            items.append({"text": clean_i})
-                            
-                    if items:
-                        block_list.append({
-                            "_pos": pos,
-                            "type": "list",
-                            "ordered": is_ordered,
-                            "items": items
+                else:
+                    sub_images = []
+                    for img_item in imgs:
+                        ip = img_item[1].strip()
+                        fp, b64 = LatexParser._load_image_b64(base_dir, ip)
+                        sub_images.append({
+                            "image_filename": os.path.basename(fp or ip),
+                            "image_data_b64": b64,
+                            "original_path": ip
                         })
+                    fig_dict = {
+                        "type": "figure",
+                        "id": f"fig_{len(section_obj.blocks)+len(block_list)+1}",
+                        "caption": caption,
+                        "label": label,
+                        "sub_images": sub_images,
+                        "image_filename": sub_images[0]["image_filename"] if sub_images else "",
+                        "image_data_b64": sub_images[0]["image_data_b64"] if sub_images else None,
+                        "_pos": pos
+                    }
+                    block_list.append(fig_dict)
                     
-                # Clean text paragraphs while preserving in-text citations (\cite, \citep, \citet), refs, and math
-                clean_p_text = re.sub(r'\\begin\{(?:figure|table|equation|align|strip|itemize|enumerate|center|minipage)[*]?\}.*?\\end\{(?:figure|table|equation|align|strip|itemize|enumerate|center|minipage)[*]?\}', '', text_block, flags=re.DOTALL)
-                clean_p_text = re.sub(r'\\item\b', '', clean_p_text)
-                clean_p_text = re.sub(r'\\includegraphics(?:\[[^\]]*\])?\{[^}]+\}', '', clean_p_text)
-                clean_p_text = re.sub(r'\\caption(?:of\{figure\})?\{[^}]+\}', '', clean_p_text)
-                clean_p_text = re.sub(r'\\label\{[^}]+\}', '', clean_p_text) # STRIP LABELS PREVENTING LEAK
-                clean_p_text = re.sub(r'\\(?:bibliography|bibliographystyle|nocite|biboptions|printbibliography)\{[^}]*\}', '', clean_p_text, flags=re.DOTALL)
-                clean_p_text = re.sub(r'\\begin\{bio(?:graphy)?\}.*?\\end\{bio(?:graphy)?\}', '', clean_p_text, flags=re.DOTALL)
-                clean_p_text = re.sub(r'\\bio(?:\[[^\]]*\])?\{[^}]*\}.*?(?=\\endbio|\Z)', '', clean_p_text, flags=re.DOTALL)
+            # Fallback for standalone \includegraphics
+            img_matches = re.finditer(r'\\includegraphics(?:\[([^\]]*)\])?\{([^}]+)\}', text_block)
+            for m in img_matches:
+                pos = m.start()
+                if any(start <= pos <= end for start, end in extracted_spans):
+                    continue
+                    
+                img_path = m.group(2).strip()
+                surrounding = text_block[max(0, pos-300):min(len(text_block), pos+400)]
+                cap_m = re.search(r'\\caption(?:of\{figure\})?\{([^}]+)\}', surrounding)
+                lbl_m = re.search(r'\\label\{([^}]+)\}', surrounding)
                 
-                # Protect citations, refs, and math using temporary placeholders
-                placeholders = []
-                def protect_macro(match):
-                    placeholders.append(match.group(0))
-                    return f"___MACRO_HOLDER_{len(placeholders)-1}___"
+                caption = cap_m.group(1).strip() if cap_m else ""
+                label = lbl_m.group(1).strip() if lbl_m else None
+                found_p, b64_str = LatexParser._load_image_b64(base_dir, img_path)
                 
-                # Protect \cite, \citep, \citet, \citeauthor, \citeyear, \citealt, \citealp
-                clean_p_text = re.sub(r'\\cite[a-zA-Z]*(?:\[[^\]]*\])*\{[^}]+\}', protect_macro, clean_p_text)
-                # Protect \ref, \pageref, \eqref
-                clean_p_text = re.sub(r'\\(?:ref|pageref|eqref)\{[^}]+\}', protect_macro, clean_p_text)
-                # Protect inline math ($...$)
-                clean_p_text = re.sub(r'\$[^$]+\$', protect_macro, clean_p_text)
+                fig_dict = Figure(
+                    id=f"fig_{len(section_obj.blocks)+len(block_list)+1}",
+                    caption=caption,
+                    label=label,
+                    image_filename=os.path.basename(found_p or img_path),
+                    image_data_b64=b64_str,
+                    original_path=img_path
+                ).model_dump()
+                fig_dict["_pos"] = pos
+                block_list.append(fig_dict)
                 
-                # Clean remaining formatting macros without unwrapping \begin / \end environment macros
-                clean_p_text = re.sub(r'\\(?!begin\b|end\b)[a-zA-Z]+\{([^}]+)\}', r'\1', clean_p_text)
-                clean_p_text = re.sub(r'\\(?:textbf|textit|emph|textrm|sf|tt|large|small|noindent)', '', clean_p_text).strip()
+            # 3. Extract Tables
+            tbl_matches = re.finditer(r'\\begin\{table[*]?\}(.*?)\\end\{table[*]?\}', text_block, re.DOTALL)
+            for tm in tbl_matches:
+                tbl_str = tm.group(1)
+                pos = tm.start()
+                extracted_spans.append((tm.start(), tm.end()))
                 
-                # Restore protected citations, refs, and math in REVERSE ORDER to avoid index substring collision
-                for p_idx in range(len(placeholders) - 1, -1, -1):
-                    clean_p_text = clean_p_text.replace(f"___MACRO_HOLDER_{p_idx}___", placeholders[p_idx])
+                cap_match = re.search(r'\\caption\{([^}]+)\}', tbl_str)
+                lbl_match = re.search(r'\\label\{([^}]+)\}', tbl_str)
+                caption = cap_match.group(1).strip() if cap_match else ""
                 
-                paras = [p.strip() for p in clean_p_text.split("\n\n") if len(p.strip()) > 15]
-                for p in paras:
-                    if not re.match(r'^(?:sec|fig|tab|eq):[a-zA-Z0-9_-]+$', p.strip()):
-                        p_pos = text_block.find(p[:25])
-                        if p_pos == -1:
-                            p_pos = text_block.find(p[:15])
-                        if p_pos == -1:
-                            p_pos = 999999
-                        p_dict = Paragraph(text=p).model_dump()
-                        p_dict["_pos"] = p_pos
-                        block_list.append(p_dict)
+                tab_match = re.search(r'\\begin\{tabular\}\s*\{((?:[^{}]|\{[^{}]*\})+)\}(.*?)\\end\{tabular\}', tbl_str, re.DOTALL)
+                rows = []
+                headers = []
+                col_spec = None
+                if tab_match:
+                    col_spec = tab_match.group(1).strip()
+                    raw_tab = tab_match.group(2)
+                    raw_rows = [r.strip() for r in re.split(r'\\\\', raw_tab) if r.strip()]
+                    for r_idx, r_str in enumerate(raw_rows):
+                        cell_list = []
+                        for c in r_str.split('&'):
+                            c_str = c.strip()
+                            c_placeholders = []
+                            def protect_cell_cite(m_c):
+                                c_placeholders.append(m_c.group(0))
+                                return f"___CELL_CITE_{len(c_placeholders)-1}___"
+                            c_str = re.sub(r'\\cite[a-zA-Z]*(?:\[[^\]]*\])*\{[^}]+\}', protect_cell_cite, c_str)
+                            c_str = re.sub(r'\\(?!begin\b|end\b)[a-zA-Z]+\{([^}]+)\}', r'\1', c_str)
+                            c_str = re.sub(r'\\(?:textbf|textit|emph|hline|toprule|midrule|bottomrule)', '', c_str).strip()
+                            for c_idx in range(len(c_placeholders) - 1, -1, -1):
+                                c_str = c_str.replace(f"___CELL_CITE_{c_idx}___", c_placeholders[c_idx])
+                            cell_list.append(c_str)
+                        if r_idx == 0:
+                            headers = cell_list
+                        else:
+                            rows.append(cell_list)
+                            
+                tbl_dict = Table(
+                    id=f"tbl_{len(section_obj.blocks)+len(block_list)+1}",
+                    caption=caption,
+                    label=lbl_match.group(1) if lbl_match else None,
+                    col_spec=col_spec,
+                    headers=headers,
+                    rows=rows
+                ).model_dump()
+                tbl_dict["_pos"] = pos
+                block_list.append(tbl_dict)
+                
+            # 4. Extract Equations
+            eq_matches = re.finditer(r'\\begin\{(?:equation|align|eqnarray)[*]?\}(.*?)\\end\{(?:equation|align|eqnarray)[*]?\}', text_block, re.DOTALL)
+            for em in eq_matches:
+                pos = em.start()
+                extracted_spans.append((em.start(), em.end()))
+                eq_body = em.group(1).strip()
+                lbl_m = re.search(r'\\label\{([^}]+)\}', eq_body)
+                clean_eq = re.sub(r'\\label\{[^}]+\}', '', eq_body).strip()
+                eq_dict = Equation(
+                    math_latex=clean_eq,
+                    label=lbl_m.group(1) if lbl_m else None,
+                    display_mode="block"
+                ).model_dump()
+                eq_dict["_pos"] = pos
+                block_list.append(eq_dict)
+                
+            # 5. Extract Lists
+            list_matches = re.finditer(r'\\begin\{(itemize|enumerate)\}(.*?)\\end\{\1\}', text_block, re.DOTALL)
+            for lm in list_matches:
+                pos = lm.start()
+                extracted_spans.append((lm.start(), lm.end()))
+                env_type = lm.group(1)
+                list_body = lm.group(2)
+                is_ordered = (env_type == "enumerate")
+                
+                raw_items = re.findall(r'\\item\s*(.*?)(?=\\item|\Z)', list_body, re.DOTALL)
+                items = []
+                for raw_i in raw_items:
+                    clean_i = raw_i.strip()
+                    if clean_i:
+                        i_placeholders = []
+                        def protect_item_macro(match):
+                            i_placeholders.append(match.group(0))
+                            return f"___ITEM_MACRO_{len(i_placeholders)-1}___"
+                        clean_i = re.sub(r'\\cite[a-zA-Z]*(?:\[[^\]]*\])*\{[^}]+\}', protect_item_macro, clean_i)
+                        clean_i = re.sub(r'\\(?:ref|pageref|eqref)\{[^}]+\}', protect_item_macro, clean_i)
+                        clean_i = re.sub(r'\$[^$]+\$', protect_item_macro, clean_i)
                         
-                block_list.sort(key=lambda b: b.get("_pos", 0))
-                for b in block_list:
-                    b.pop("_pos", None)
-                    section_obj.blocks.append(b)
+                        clean_i = re.sub(r'\\(?!begin\b|end\b)[a-zA-Z]+\{([^}]+)\}', r'\1', clean_i)
+                        clean_i = re.sub(r'\\(?:textbf|textit|emph|textrm|sf|tt|large|small|noindent)', '', clean_i).strip()
+                        
+                        for p_idx in range(len(i_placeholders) - 1, -1, -1):
+                            clean_i = clean_i.replace(f"___ITEM_MACRO_{p_idx}___", i_placeholders[p_idx])
+                        items.append({"text": clean_i})
+                        
+                if items:
+                    block_list.append({
+                        "_pos": pos,
+                        "type": "list",
+                        "ordered": is_ordered,
+                        "items": items
+                    })
                     
-            sections.append(section_obj)
+            # 6. Extract Paragraphs
+            clean_p_text = re.sub(r'\\begin\{(?:algorithm|algorithmic|figure|table|equation|align|eqnarray|strip|itemize|enumerate|center|minipage)[*]?\}.*?\\end\{(?:algorithm|algorithmic|figure|table|equation|align|eqnarray|strip|itemize|enumerate|center|minipage)[*]?\}', '', text_block, flags=re.DOTALL)
+            clean_p_text = re.sub(r'\\item\b', '', clean_p_text)
+            clean_p_text = re.sub(r'\\includegraphics(?:\[[^\]]*\])?\{[^}]+\}', '', clean_p_text)
+            clean_p_text = re.sub(r'\\caption(?:of\{figure\})?\{[^}]+\}', '', clean_p_text)
+            clean_p_text = re.sub(r'\\label\{[^}]+\}', '', clean_p_text)
+            clean_p_text = re.sub(r'\\(?:bibliography|bibliographystyle|nocite|biboptions|printbibliography)\{[^}]*\}', '', clean_p_text, flags=re.DOTALL)
+            clean_p_text = re.sub(r'\\begin\{bio(?:graphy)?\}.*?\\end\{bio(?:graphy)?\}', '', clean_p_text, flags=re.DOTALL)
+            clean_p_text = re.sub(r'\\bio(?:\[[^\]]*\])?\{[^}]*\}.*?(?=\\endbio|\Z)', '', clean_p_text, flags=re.DOTALL)
             
+            clean_p_text = re.sub(r'\\(?:vspace|hspace)\{[^}]+\}', '', clean_p_text)
+            clean_p_text = re.sub(r'\\(?:end\{center\}|end\{minipage\}|noindent|footnotesize|small|large)', '', clean_p_text)
+            clean_p_text = re.sub(r'^\s*1mm\s*$', '', clean_p_text, flags=re.MULTILINE)
+            clean_p_text = re.sub(r'\{\s*\\footnotesize.*?\n\}', '', clean_p_text, flags=re.DOTALL)
+            
+            placeholders = []
+            def protect_macro(match):
+                placeholders.append(match.group(0))
+                return f"___MACRO_HOLDER_{len(placeholders)-1}___"
+                
+            clean_p_text = re.sub(r'\\cite[a-zA-Z]*(?:\[[^\]]*\])*\{[^}]+\}', protect_macro, clean_p_text)
+            clean_p_text = re.sub(r'\\(?:ref|pageref|eqref)\{[^}]+\}', protect_macro, clean_p_text)
+            clean_p_text = re.sub(r'\$[^$]+\$', protect_macro, clean_p_text)
+            
+            clean_p_text = re.sub(r'\\(?!begin\b|end\b)[a-zA-Z]+\{([^}]+)\}', r'\1', clean_p_text)
+            clean_p_text = re.sub(r'\\(?:textbf|textit|emph|textrm|sf|tt|large|small|noindent)', '', clean_p_text).strip()
+            
+            for p_idx in range(len(placeholders) - 1, -1, -1):
+                clean_p_text = clean_p_text.replace(f"___MACRO_HOLDER_{p_idx}___", placeholders[p_idx])
+                
+            clean_p_text = re.sub(r'\\ref\{fig:dominant_explanation_aspects\}', 'dominant aspect explanation analysis', clean_p_text)
+            
+            paras = [p.strip() for p in clean_p_text.split("\n\n") if len(p.strip()) > 15]
+            for p in paras:
+                if not re.match(r'^(?:sec|fig|tab|eq):[a-zA-Z0-9_-]+$', p.strip()):
+                    p_pos = text_block.find(p[:25])
+                    if p_pos == -1:
+                        p_pos = text_block.find(p[:15])
+                    if p_pos == -1:
+                        p_pos = 999999
+                    p_dict = Paragraph(text=p).model_dump()
+                    p_dict["_pos"] = p_pos
+                    block_list.append(p_dict)
+                    
+            block_list.sort(key=lambda b: b.get("_pos", 0))
+            for b in block_list:
+                b.pop("_pos", None)
+                section_obj.blocks.append(b)
+                
+            if section_obj.blocks or section_obj.title not in ["Preamble", "Document"]:
+                sections.append(section_obj)
+                
         return sections, warnings
 
     @staticmethod

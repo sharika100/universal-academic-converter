@@ -148,7 +148,9 @@ class PdfPreviewGenerator:
                 if btype == "paragraph":
                     story.append(Paragraph(safe_xml(blk.get("text", "")), body_style))
                 elif btype == "equation":
-                    eq_str = f"<i>{safe_xml(blk.get('math_latex', ''))}</i> &nbsp;&nbsp;&nbsp; ({safe_xml(str(blk.get('label', 'eq')))})"
+                    lbl = str(blk.get('label', '') or '').strip()
+                    lbl_part = f" &nbsp;&nbsp;&nbsp; ({safe_xml(lbl)})" if lbl and lbl not in ["None", "null", "undefined"] else ""
+                    eq_str = f"<i>{safe_xml(blk.get('math_latex', ''))}</i>{lbl_part}"
                     story.append(Paragraph(eq_str, body_style))
                 elif btype == "figure":
                     b64_data = blk.get("image_data_b64")

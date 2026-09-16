@@ -136,6 +136,13 @@ class Table(BaseModel):
     colspan_matrix: List[List[int]] = Field(default_factory=list)
     rowspan_matrix: List[List[int]] = Field(default_factory=list)
 
+class Algorithm(BaseModel):
+    type: str = "algorithm"
+    id: str
+    caption: str = ""
+    label: Optional[str] = None
+    code: str = ""
+
 class Section(BaseModel):
     title: str
     level: int = 1
