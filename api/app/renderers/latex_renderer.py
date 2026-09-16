@@ -151,17 +151,22 @@ class LatexRenderer:
                     aff_lines.append(f"\\textit{{{a.role}}}")
                 aff_names = [aff.institution for aff in affiliations if aff.id in a.affiliation_ids and aff.institution]
                 if aff_names:
-                    aff_lines.extend(aff_names)
+                    for inst in aff_names:
+                        for part in inst.split(","):
+                            if part.strip():
+                                aff_lines.append(part.strip())
                 elif affiliations and affiliations[0].institution:
-                    aff_lines.append(affiliations[0].institution)
+                    for part in affiliations[0].institution.split(","):
+                        if part.strip():
+                            aff_lines.append(part.strip())
                 if a.email:
                     aff_lines.append(a.email)
-                aff_text = " \\\\ ".join(aff_lines) if aff_lines else ""
+                aff_text = "\\\\\n".join(aff_lines) if aff_lines else ""
                 if aff_text:
-                    author_blocks.append(f"\\IEEEauthorblockN{{{a.name}}}\n\\IEEEauthorblockA{{{aff_text}}}")
+                    author_blocks.append(f"\\IEEEauthorblockN{{{a.name}}}\n\\IEEEauthorblockA{{\n{aff_text}\n}}")
                 else:
                     author_blocks.append(f"\\IEEEauthorblockN{{{a.name}}}")
-            lines.append(f"\\author{{\n{ ' \\and '.join(author_blocks) }\n}}\n\\maketitle\n")
+            lines.append(f"\\author{{\n{ '\n\\and\n'.join(author_blocks) }\n}}\n\\maketitle\n")
             
         elif spec.author_style == "springer":
             for a in authors:
