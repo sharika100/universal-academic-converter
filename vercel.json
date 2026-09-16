@@ -54,6 +54,14 @@
       "dest": "api/index.py"
     },
     {
+      "src": "/admin/(.*)",
+      "dest": "frontend/index.html"
+    },
+    {
+      "src": "/admin",
+      "dest": "frontend/index.html"
+    },
+    {
       "src": "/(.*)",
       "dest": "frontend/$1"
     }
