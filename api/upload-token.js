@@ -87,6 +87,7 @@ export default async function handler(request, response) {
       operation: 'put',
       pathname,
       access: 'private',
+      addRandomSuffix: false,
       ...commandOptions,
     });
 
