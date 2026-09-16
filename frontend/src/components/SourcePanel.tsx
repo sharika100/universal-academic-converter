@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { FileText, Upload, FolderArchive, CheckCircle, FileCode, ChevronRight, Eye } from 'lucide-react';
+import { FileText, Upload, FolderArchive, CheckCircle, FileCode, Eye, ShieldAlert, Info } from 'lucide-react';
 
 interface FileTreeItem {
   path: string;
@@ -16,6 +16,7 @@ interface SourcePanelProps {
   onFileUpload: (file: File) => void;
   analysisDone: boolean;
   onViewStructure: () => void;
+  onOpenResponsibleUseModal: () => void;
 }
 
 export const SourcePanel: React.FC<SourcePanelProps> = ({
@@ -25,7 +26,8 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
   fileTree,
   onFileUpload,
   analysisDone,
-  onViewStructure
+  onViewStructure,
+  onOpenResponsibleUseModal
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -37,7 +39,7 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
   };
 
   return (
-    <div className="panel">
+    <div className="panel" style={{ display: 'flex', flexDirection: 'column' }}>
       <div className="panel-header">
         <div className="panel-title">
           <FileText color="#6366F1" size={22} />
@@ -116,6 +118,30 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
           </div>
         </div>
       )}
+
+      {/* Compact Responsible Use Notice */}
+      <div style={{ marginTop: 'auto', paddingTop: '16px' }}>
+        <div style={{ background: '#0B0F19', border: '1px solid #1E293B', borderRadius: '10px', padding: '12px 14px', fontSize: '0.775rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+            <span style={{ fontWeight: 600, color: '#A5B4FC', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <ShieldAlert size={14} color="#6366F1" /> Responsible Use & Privacy
+            </span>
+            <button
+              type="button"
+              onClick={onOpenResponsibleUseModal}
+              style={{ background: 'transparent', border: 'none', color: '#38BDF8', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600, padding: 0, textDecoration: 'underline' }}
+            >
+              Learn more
+            </button>
+          </div>
+          <p style={{ color: '#94A3B8', margin: '0 0 4px 0', lineHeight: 1.4 }}>
+            Before uploading a document, make sure you have the right or permission to process it. Do not upload confidential, sensitive, personal, examination, proprietary, or unpublished material unless you are authorized to do so.
+          </p>
+          <p style={{ color: '#64748B', margin: 0, lineHeight: 1.4 }}>
+            The converter is intended for document format and structural transformation. Always review the converted document before publication, submission, circulation, or official use.
+          </p>
+        </div>
+      </div>
     </div>
   );
 };

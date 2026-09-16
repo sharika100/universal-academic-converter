@@ -8,10 +8,11 @@ import { ReportView } from './components/ReportView';
 import { PdfPreviewModal } from './components/PdfPreviewModal';
 import { StructureModal } from './components/StructureModal';
 import { EntrypointSelectModal } from './components/EntrypointSelectModal';
+import { ResponsibleUseModal } from './components/ResponsibleUseModal';
 import { ErrorPanel, APIErrorState } from './components/ErrorPanel';
 import { DebugPanel } from './components/DebugPanel';
 import { Footer } from './components/Footer';
-import { Play, Search, Loader2, ArrowRight, ShieldCheck } from 'lucide-react';
+import { Play, Search, Loader2, ShieldCheck, ShieldAlert, CheckCircle2 } from 'lucide-react';
 
 const PROGRESS_STEPS = [
   "1. Uploading files",
@@ -41,6 +42,7 @@ export const App: React.FC = () => {
   const [destSpec, setDestSpec] = useState<any | null>(null);
 
   const [conversionMode, setConversionMode] = useState<string>('FORMAT_ONLY');
+  const [hasAcknowledged, setHasAcknowledged] = useState<boolean>(false);
 
   const [jobId, setJobId] = useState<string | null>(null);
   const [mapping, setMapping] = useState<any | null>(null);
@@ -51,6 +53,7 @@ export const App: React.FC = () => {
   const [progressStep, setProgressStep] = useState<number>(0);
 
   const [showPdfModal, setShowPdfModal] = useState<boolean>(false);
+  const [showResponsibleUseModal, setShowResponsibleUseModal] = useState<boolean>(false);
   const [activeStructureModal, setActiveStructureModal] = useState<'source' | 'dest' | null>(null);
 
   const [possibleEntrypoints, setPossibleEntrypoints] = useState<string[]>([]);
@@ -268,6 +271,17 @@ export const App: React.FC = () => {
       return;
     }
 
+    if (!hasAcknowledged) {
+      setApiError({
+        stage: 'conversion',
+        error_code: 'ACKNOWLEDGEMENT_REQUIRED',
+        message: 'Responsible-use acknowledgement required before conversion.',
+        reference_id: 'REF-ACK-REQUIRED',
+        detail: 'Please check the responsible-use permission acknowledgement checkbox before proceeding.'
+      });
+      return;
+    }
+
     setConverting(true);
     setApiError(null);
     setProgressStep(0);
@@ -322,7 +336,7 @@ export const App: React.FC = () => {
     }
   };
 
-  const isConvertEnabled = !!sourceUdm && !!destSpec && !apiError && !analyzing && !converting;
+  const isConvertEnabled = !!sourceUdm && !!destSpec && !apiError && !analyzing && !converting && hasAcknowledged;
 
   return (
     <div className="app-container">
@@ -344,6 +358,7 @@ export const App: React.FC = () => {
           onFileUpload={(f) => setSourceFile(f)}
           analysisDone={!!sourceUdm}
           onViewStructure={() => setActiveStructureModal('source')}
+          onOpenResponsibleUseModal={() => setShowResponsibleUseModal(true)}
         />
 
         <DestinationPanel
@@ -388,6 +403,34 @@ export const App: React.FC = () => {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Academic & Research Integrity Notice */}
+      <div style={{ background: '#0B0F19', border: '1px solid #1E293B', borderRadius: '12px', padding: '16px 20px', marginBottom: '20px' }}>
+        <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#F59E0B', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+          <ShieldAlert size={18} color="#F59E0B" /> Research Integrity Notice:
+        </div>
+        <p style={{ fontSize: '0.825rem', color: '#CBD5E1', margin: '0 0 6px 0', lineHeight: 1.5 }}>
+          FORMAT ONLY mode is designed to preserve the source content and does not intentionally rewrite scientific content. Automated conversion may nevertheless introduce formatting or structural errors.
+        </p>
+        <p style={{ fontSize: '0.8rem', color: '#94A3B8', margin: 0, lineHeight: 1.4 }}>
+          Always verify authors, affiliations, figures, captions, equations, tables, references, and scientific content before submission. The converter does not guarantee journal, conference, publisher, institutional, or accreditation acceptance.
+        </p>
+      </div>
+
+      {/* Pre-Conversion Responsible-Use Acknowledgement Checkbox */}
+      <div style={{ background: '#111827', border: hasAcknowledged ? '1px solid #10B981' : '1px solid #374151', borderRadius: '12px', padding: '14px 18px', marginBottom: '24px', transition: 'all 0.2s ease' }}>
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer', fontSize: '0.85rem', color: '#F8FAFC', userSelect: 'none' }}>
+          <input
+            type="checkbox"
+            checked={hasAcknowledged}
+            onChange={(e) => setHasAcknowledged(e.target.checked)}
+            style={{ marginTop: '3px', width: '16px', height: '16px', accentColor: '#10B981', cursor: 'pointer' }}
+          />
+          <span>
+            I have permission to process this document, and I understand that automated conversion should be reviewed before official use.
+          </span>
+        </label>
       </div>
 
       {/* Structured Error Panel */}
@@ -511,6 +554,12 @@ export const App: React.FC = () => {
           onClose={() => setShowPdfModal(false)}
         />
       )}
+
+      {/* Responsible Use Modal */}
+      <ResponsibleUseModal
+        isOpen={showResponsibleUseModal}
+        onClose={() => setShowResponsibleUseModal(false)}
+      />
 
       {/* Structure Modal */}
       {activeStructureModal && (
