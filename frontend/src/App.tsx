@@ -204,6 +204,8 @@ export const App: React.FC = () => {
             body: JSON.stringify({
               upload_id: `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
               blob_url: finalBlobUrl,
+              download_url: authData.downloadUrl,
+              pathname: authData.pathname,
               filename: sourceFile.name,
               sha256: srcHash,
               selected_entrypoint: overrideEntrypoint || selectedEntrypoint,
@@ -329,6 +331,8 @@ export const App: React.FC = () => {
             body: JSON.stringify({
               job_id: srcJson.job_id,
               blob_url: finalBlobUrl,
+              download_url: authData.downloadUrl,
+              pathname: authData.pathname,
               filename: destFile.name,
               sha256: destHash
             })

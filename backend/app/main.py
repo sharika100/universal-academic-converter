@@ -113,7 +113,7 @@ INLINE_INDEX_HTML = """<!doctype html>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <script type="module" crossorigin src="/assets/index-C4vEPjbf.js"></script>
+    <script type="module" crossorigin src="/assets/index-DBKcGpcB.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-DdlYOea-.css">
   </head>
   <body>
@@ -124,6 +124,8 @@ INLINE_INDEX_HTML = """<!doctype html>
 class StorageAnalysisRequest(BaseModel):
     upload_id: str
     blob_url: str
+    download_url: Optional[str] = None
+    pathname: Optional[str] = None
     filename: Optional[str] = None
     sha256: Optional[str] = None
     selected_entrypoint: Optional[str] = None
@@ -133,6 +135,8 @@ class TemplateStorageAnalysisRequest(BaseModel):
     job_id: str
     upload_id: Optional[str] = None
     blob_url: str
+    download_url: Optional[str] = None
+    pathname: Optional[str] = None
     filename: Optional[str] = None
     sha256: Optional[str] = None
 
@@ -332,7 +336,7 @@ async def analyze_source_from_storage(req: StorageAnalysisRequest):
             ref_id=ref_id
         ))
         
-    # 2. Retrieve file content using server-side Vercel Blob token if present
+    # 2. Retrieve file content using signed download URL or server token
     try:
         if os.path.exists(req.blob_url):
             with open(req.blob_url, "rb") as fh:
@@ -340,11 +344,15 @@ async def analyze_source_from_storage(req: StorageAnalysisRequest):
         else:
             headers = {}
             token = get_blob_read_write_token()
-            if token:
+            if token and not req.download_url:
                 headers["Authorization"] = f"Bearer {token}"
-            resp = requests.get(req.blob_url, headers=headers, timeout=60)
+            
+            fetch_url = req.download_url if req.download_url else req.blob_url
+            logger.info(f"[{ref_id}] [BLOB_RETRIEVAL_ATTEMPTED] Fetching from storage (pathname: '{req.pathname or clean_filename}')")
+            
+            resp = requests.get(fetch_url, headers=headers, timeout=60)
             if resp.status_code in (401, 403, 404):
-                logger.info(f"[{ref_id}] Direct HTTP fetch got status {resp.status_code}. Attempting Node OIDC Blob helper (/api/blob-download)...")
+                logger.info(f"[{ref_id}] Primary storage fetch got status {resp.status_code}. Attempting Node Blob helper (/api/blob-download)...")
                 try:
                     host_url = os.environ.get("VERCEL_PROJECT_PRODUCTION_URL") or os.environ.get("VERCEL_URL")
                     if host_url:
@@ -357,15 +365,17 @@ async def analyze_source_from_storage(req: StorageAnalysisRequest):
                     resp_helper = requests.get(helper_url, timeout=60)
                     if resp_helper.status_code == 200 and len(resp_helper.content) > 0:
                         resp = resp_helper
-                        logger.info(f"[{ref_id}] Node OIDC Blob helper successfully retrieved {len(resp.content)} bytes")
+                        logger.info(f"[{ref_id}] [BLOB_RETRIEVAL_RESULT] Node Blob helper retrieved {len(resp.content)} bytes")
                 except Exception as helper_err:
-                    logger.warning(f"[{ref_id}] Node OIDC Blob helper request failed: {helper_err}")
+                    logger.warning(f"[{ref_id}] Node Blob helper request failed: {helper_err}")
+            
             if resp.status_code != 200:
+                logger.error(f"[{ref_id}] [BLOB_RETRIEVAL_RESULT] Storage retrieval failed with status {resp.status_code}")
                 return JSONResponse(status_code=400, content=create_error_payload(
                     stage="source_analysis",
-                    error_code="LATEX_PROJECT_UPLOAD_ERROR",
-                    message=f"Unable to retrieve uploaded file from Blob storage (HTTP {resp.status_code}).",
-                    detail=f"Storage request returned status code {resp.status_code}.",
+                    error_code="STORAGE_OBJECT_NOT_FOUND",
+                    message="Uploaded project could not be retrieved from secure storage. Please retry the upload.",
+                    detail=f"Storage request returned status code {resp.status_code} for pathname '{req.pathname or clean_filename}'.",
                     ref_id=ref_id
                 ))
             content = resp.content
@@ -602,11 +612,15 @@ async def analyze_template_from_storage(req: TemplateStorageAnalysisRequest):
         else:
             headers = {}
             token = get_blob_read_write_token()
-            if token:
+            if token and not req.download_url:
                 headers["Authorization"] = f"Bearer {token}"
-            resp = requests.get(req.blob_url, headers=headers, timeout=60)
+            
+            fetch_url = req.download_url if req.download_url else req.blob_url
+            logger.info(f"[{ref_id}] [BLOB_RETRIEVAL_ATTEMPTED] Fetching template from storage (pathname: '{req.pathname or clean_filename}')")
+            
+            resp = requests.get(fetch_url, headers=headers, timeout=60)
             if resp.status_code in (401, 403, 404):
-                logger.info(f"[{ref_id}] Direct HTTP fetch got status {resp.status_code}. Attempting Node OIDC Blob helper (/api/blob-download)...")
+                logger.info(f"[{ref_id}] Direct HTTP fetch got status {resp.status_code}. Attempting Node Blob helper (/api/blob-download)...")
                 try:
                     host_url = os.environ.get("VERCEL_PROJECT_PRODUCTION_URL") or os.environ.get("VERCEL_URL")
                     if host_url:
@@ -619,15 +633,17 @@ async def analyze_template_from_storage(req: TemplateStorageAnalysisRequest):
                     resp_helper = requests.get(helper_url, timeout=60)
                     if resp_helper.status_code == 200 and len(resp_helper.content) > 0:
                         resp = resp_helper
-                        logger.info(f"[{ref_id}] Node OIDC Blob helper successfully retrieved template ({len(resp.content)} bytes)")
+                        logger.info(f"[{ref_id}] [BLOB_RETRIEVAL_RESULT] Node Blob helper retrieved template ({len(resp.content)} bytes)")
                 except Exception as helper_err:
-                    logger.warning(f"[{ref_id}] Node OIDC Blob helper template request failed: {helper_err}")
+                    logger.warning(f"[{ref_id}] Node Blob helper template request failed: {helper_err}")
+            
             if resp.status_code != 200:
+                logger.error(f"[{ref_id}] [BLOB_RETRIEVAL_RESULT] Template storage retrieval failed with status {resp.status_code}")
                 return JSONResponse(status_code=400, content=create_error_payload(
                     stage="template_analysis",
-                    error_code="TEMPLATE_ANALYSIS_ERROR",
-                    message=f"Unable to retrieve template from Blob storage (HTTP {resp.status_code}).",
-                    detail=f"Storage request returned status code {resp.status_code}.",
+                    error_code="STORAGE_OBJECT_NOT_FOUND",
+                    message="Uploaded template could not be retrieved from secure storage. Please retry the upload.",
+                    detail=f"Storage request returned status code {resp.status_code} for pathname '{req.pathname or clean_filename}'.",
                     ref_id=ref_id
                 ))
             content = resp.content

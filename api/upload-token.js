@@ -1,4 +1,4 @@
-import { issueSignedToken, presignUrl, handleUpload } from '@vercel/blob';
+import { issueSignedToken, presignUrl, handleUpload, parseStoreIdFromDelegationToken } from '@vercel/blob';
 
 function getBlobToken() {
   if (process.env.BLOB_READ_WRITE_TOKEN) {
@@ -44,12 +44,19 @@ export default async function handler(request, response) {
       body = request.body || {};
     }
 
+    const filename = body.filename || `manuscript_${Date.now()}.zip`;
+    const size = body.size || 0;
+    const cleanFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const pathname = `uploads/${Date.now()}_${cleanFilename}`;
+
+    console.log(`[UPLOAD_REQUESTED] filename: ${cleanFilename}, size: ${size}`);
+
     // A. Handle standard @vercel/blob client event if type is present
     if (body && body.type && typeof body.type === 'string' && body.type.startsWith('blob.')) {
       const handleUploadOptions = {
         body,
         request,
-        onBeforeGenerateToken: async (pathname) => {
+        onBeforeGenerateToken: async (pName) => {
           return {
             allowedContentTypes: [
               'application/zip',
@@ -64,7 +71,7 @@ export default async function handler(request, response) {
           };
         },
         onUploadCompleted: async ({ blob }) => {
-          console.log('[BLOB_UPLOAD_COMPLETED] Upload completed:', blob.url);
+          console.log(`[BLOB_UPLOAD_COMPLETED] pathname: ${blob.pathname}, contentType: ${blob.contentType}`);
         },
       };
 
@@ -77,11 +84,7 @@ export default async function handler(request, response) {
       return response.status(200).json(jsonResponse);
     }
 
-    // B. Direct Signed PUT URL Generation (supports OIDC natively)
-    const filename = body.filename || `manuscript_${Date.now()}.zip`;
-    const cleanFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const pathname = `uploads/${Date.now()}_${cleanFilename}`;
-
+    // B. Direct Signed PUT & GET URL Generation (supports OIDC & private access natively)
     const commandOptions = {};
     const token = getBlobToken();
     if (token) {
@@ -90,7 +93,7 @@ export default async function handler(request, response) {
 
     const signedToken = await issueSignedToken({
       pathname,
-      operations: ['put'],
+      operations: ['put', 'get'],
       allowedContentTypes: [
         'application/zip',
         'application/x-zip-compressed',
@@ -104,19 +107,38 @@ export default async function handler(request, response) {
       ...commandOptions,
     });
 
-    const { presignedUrl } = await presignUrl(signedToken, {
+    let storeId = 'store';
+    try {
+      if (signedToken && signedToken.delegationToken) {
+        storeId = parseStoreIdFromDelegationToken(signedToken.delegationToken) || 'store';
+      }
+    } catch (e) {
+      console.warn('Could not parse storeId from delegation token:', e.message);
+    }
+
+    const canonicalBlobUrl = `https://${storeId}.private.blob.vercel-storage.com/${pathname}`;
+
+    const { presignedUrl: uploadUrl } = await presignUrl(signedToken, {
       operation: 'put',
       pathname,
       access: 'private',
       ...commandOptions,
     });
 
-    console.log('[BLOB_SIGNED_URL_ISSUED] Successfully generated direct signed PUT URL for:', pathname);
+    const { presignedUrl: downloadUrl } = await presignUrl(signedToken, {
+      operation: 'get',
+      pathname,
+      access: 'private',
+      ...commandOptions,
+    });
+
+    console.log(`[BLOB_UPLOAD_AUTHORIZED] pathname: ${pathname}, storeId: ${storeId}`);
 
     return response.status(200).json({
-      uploadUrl: presignedUrl,
+      uploadUrl,
+      downloadUrl,
       pathname,
-      blobUrl: `https://blob.vercel-storage.com/${pathname}`
+      blobUrl: canonicalBlobUrl
     });
 
   } catch (error) {
