@@ -6,6 +6,7 @@ import zipfile
 import logging
 import hashlib
 import requests
+import urllib.parse
 from typing import Optional, Dict, Any
 from pydantic import BaseModel
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
@@ -112,7 +113,7 @@ INLINE_INDEX_HTML = """<!doctype html>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <script type="module" crossorigin src="/assets/index-CczmXOzT.js"></script>
+    <script type="module" crossorigin src="/assets/index-N9VIDx6O.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-DdlYOea-.css">
   </head>
   <body>
@@ -342,6 +343,23 @@ async def analyze_source_from_storage(req: StorageAnalysisRequest):
             if token:
                 headers["Authorization"] = f"Bearer {token}"
             resp = requests.get(req.blob_url, headers=headers, timeout=60)
+            if resp.status_code in (401, 403, 404):
+                logger.info(f"[{ref_id}] Direct HTTP fetch got status {resp.status_code}. Attempting Node OIDC Blob helper (/api/blob-download)...")
+                try:
+                    host_url = os.environ.get("VERCEL_PROJECT_PRODUCTION_URL") or os.environ.get("VERCEL_URL")
+                    if host_url:
+                        if not host_url.startswith("http"):
+                            host_url = f"https://{host_url}"
+                        helper_url = f"{host_url}/api/blob-download?url={urllib.parse.quote(req.blob_url, safe='')}"
+                    else:
+                        helper_url = f"http://127.0.0.1:3000/api/blob-download?url={urllib.parse.quote(req.blob_url, safe='')}"
+                    
+                    resp_helper = requests.get(helper_url, timeout=60)
+                    if resp_helper.status_code == 200 and len(resp_helper.content) > 0:
+                        resp = resp_helper
+                        logger.info(f"[{ref_id}] Node OIDC Blob helper successfully retrieved {len(resp.content)} bytes")
+                except Exception as helper_err:
+                    logger.warning(f"[{ref_id}] Node OIDC Blob helper request failed: {helper_err}")
             if resp.status_code != 200:
                 return JSONResponse(status_code=400, content=create_error_payload(
                     stage="source_analysis",
@@ -587,6 +605,23 @@ async def analyze_template_from_storage(req: TemplateStorageAnalysisRequest):
             if token:
                 headers["Authorization"] = f"Bearer {token}"
             resp = requests.get(req.blob_url, headers=headers, timeout=60)
+            if resp.status_code in (401, 403, 404):
+                logger.info(f"[{ref_id}] Direct HTTP fetch got status {resp.status_code}. Attempting Node OIDC Blob helper (/api/blob-download)...")
+                try:
+                    host_url = os.environ.get("VERCEL_PROJECT_PRODUCTION_URL") or os.environ.get("VERCEL_URL")
+                    if host_url:
+                        if not host_url.startswith("http"):
+                            host_url = f"https://{host_url}"
+                        helper_url = f"{host_url}/api/blob-download?url={urllib.parse.quote(req.blob_url, safe='')}"
+                    else:
+                        helper_url = f"http://127.0.0.1:3000/api/blob-download?url={urllib.parse.quote(req.blob_url, safe='')}"
+                    
+                    resp_helper = requests.get(helper_url, timeout=60)
+                    if resp_helper.status_code == 200 and len(resp_helper.content) > 0:
+                        resp = resp_helper
+                        logger.info(f"[{ref_id}] Node OIDC Blob helper successfully retrieved template ({len(resp.content)} bytes)")
+                except Exception as helper_err:
+                    logger.warning(f"[{ref_id}] Node OIDC Blob helper template request failed: {helper_err}")
             if resp.status_code != 200:
                 return JSONResponse(status_code=400, content=create_error_payload(
                     stage="template_analysis",

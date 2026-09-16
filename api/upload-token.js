@@ -9,20 +9,12 @@ function getBlobToken() {
       return value;
     }
   }
-  return null;
+  return undefined;
 }
 
 export default async function handler(request, response) {
   if (request.method !== 'POST') {
     return response.status(405).json({ error: 'Method not allowed' });
-  }
-
-  const token = getBlobToken();
-  if (!token) {
-    console.error('Vercel Blob Storage token not found in environment variables.');
-    return response.status(500).json({
-      error: 'Vercel Blob Storage token is not configured. Please connect a Vercel Blob store to your Vercel Project Settings.'
-    });
   }
 
   try {
@@ -33,10 +25,10 @@ export default async function handler(request, response) {
       body = request.body;
     }
 
-    const jsonResponse = await handleUpload({
+    const token = getBlobToken();
+    const handleUploadOptions = {
       body,
       request,
-      token,
       onBeforeGenerateToken: async (pathname /*, clientPayload */) => {
         return {
           allowedContentTypes: [
@@ -54,11 +46,20 @@ export default async function handler(request, response) {
       onUploadCompleted: async ({ blob, tokenPayload }) => {
         console.log('[BLOB_UPLOAD_COMPLETED] Private Vercel Blob upload completed:', blob.url);
       },
-    });
+    };
 
+    // If an explicit read/write token is found, pass it; otherwise let handleUpload auto-detect OIDC credentials
+    if (token) {
+      handleUploadOptions.token = token;
+    }
+
+    const jsonResponse = await handleUpload(handleUploadOptions);
     return response.status(200).json(jsonResponse);
   } catch (error) {
     console.error('Vercel Blob upload token error:', error);
-    return response.status(400).json({ error: error.message || 'Blob token generation failed' });
+    return response.status(500).json({
+      error: 'Secure large-file storage is not available for this deployment.',
+      detail: error.message || 'Blob authorization failed'
+    });
   }
 }

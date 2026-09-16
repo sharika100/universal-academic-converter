@@ -180,11 +180,9 @@ export const App: React.FC = () => {
           // DO NOT fall back to sending large file to POST /api/analyze-source!
           setApiError({
             stage: 'source_analysis',
-            error_code: 'LATEX_PROJECT_UPLOAD_ERROR',
-            message: `Source project upload failed: file size (${(sourceFile.size / 1024 / 1024).toFixed(2)} MB) exceeds Vercel Function 4.5 MB payload limit.`,
-            detail: uploadErr.message?.includes('No token found') || uploadErr.message?.includes('BLOB_READ_WRITE_TOKEN') || uploadErr.message?.includes('token')
-              ? 'Vercel Blob Storage is not configured. Please add BLOB_READ_WRITE_TOKEN to your Vercel Environment Variables.'
-              : `Vercel Blob direct upload failed: ${uploadErr.message || 'Check storage token and network connection.'}`,
+            error_code: 'STORAGE_CONFIGURATION_ERROR',
+            message: 'Secure large-file storage is not available for this deployment.',
+            detail: uploadErr.message || 'Direct Vercel Blob upload authorization failed. Check developer diagnostic panel for details.',
             reference_id: `REF-BLOB-${Date.now().toString(36).toUpperCase()}`
           });
           setAnalyzing(false);
@@ -270,9 +268,9 @@ export const App: React.FC = () => {
           console.error("Direct storage template upload failed:", destUploadErr);
           setApiError({
             stage: 'template_analysis',
-            error_code: 'TEMPLATE_UPLOAD_ERROR',
-            message: `Template upload failed: file size (${(destFile.size / 1024 / 1024).toFixed(2)} MB) exceeds Vercel Function limit.`,
-            detail: destUploadErr.message || 'Blob storage upload error.',
+            error_code: 'STORAGE_CONFIGURATION_ERROR',
+            message: 'Secure large-file storage is not available for this deployment.',
+            detail: destUploadErr.message || 'Direct Blob template upload failed.',
             reference_id: `REF-DEST-BLOB-${Date.now().toString(36).toUpperCase()}`
           });
           setAnalyzing(false);
