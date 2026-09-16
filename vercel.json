@@ -12,6 +12,18 @@
       "use": "@vercel/node"
     },
     {
+      "src": "api/blob-download.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/blob-test.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/blob-diag.js",
+      "use": "@vercel/node"
+    },
+    {
       "src": "api/index.py",
       "use": "@vercel/python"
     }
@@ -24,6 +36,18 @@
     {
       "src": "/api/blob-upload-token",
       "dest": "api/upload-token.js"
+    },
+    {
+      "src": "/api/blob-download",
+      "dest": "api/blob-download.js"
+    },
+    {
+      "src": "/api/blob-test",
+      "dest": "api/blob-test.js"
+    },
+    {
+      "src": "/api/blob-diag",
+      "dest": "api/blob-diag.js"
     },
     {
       "src": "/api/(.*)",
