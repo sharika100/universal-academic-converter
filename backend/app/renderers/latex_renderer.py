@@ -222,7 +222,12 @@ class LatexRenderer:
             
         # Keywords
         if udm.metadata.keywords:
-            lines.append(f"\\keywords{{{', '.join(udm.metadata.keywords)}}}\n")
+            if spec.document_class == "IEEEtran" or spec.author_style == "ieee":
+                lines.append("\\begin{IEEEkeywords}")
+                lines.append(", ".join(udm.metadata.keywords))
+                lines.append("\\end{IEEEkeywords}\n")
+            else:
+                lines.append(f"\\keywords{{{', '.join(udm.metadata.keywords)}}}\n")
             
         # Sections
         for sec in udm.sections:

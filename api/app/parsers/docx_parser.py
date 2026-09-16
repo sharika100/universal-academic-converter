@@ -200,8 +200,8 @@ class DocxParser:
                 return
                 
             # Check for Keywords
-            if text.lower().startswith("keyword"):
-                kw_str = re.sub(r'^(keywords?[:\.\s-]*)', '', text, flags=re.I)
+            if text.lower().startswith("keyword") or text.lower().startswith("index terms"):
+                kw_str = re.sub(r'^(keywords?|index terms)[\s:;\.\-—–]*', '', text, flags=re.I).strip()
                 udm.metadata.keywords = [k.strip() for k in re.split(r'[,;]', kw_str) if k.strip()]
                 return
 
