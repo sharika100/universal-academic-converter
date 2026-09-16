@@ -128,6 +128,7 @@ class Table(BaseModel):
     id: str
     caption: str = ""
     label: Optional[str] = None
+    col_spec: Optional[str] = None
     headers: List[str] = Field(default_factory=list)
     rows: List[List[str]] = Field(default_factory=list)
     alignments: List[str] = Field(default_factory=list)

@@ -22,9 +22,8 @@ class LatexParser:
         main_tex_path = os.path.join(project_dir, entrypoint_rel)
         full_content = LatexParser._resolve_includes(main_tex_path, project_dir)
         
-        # Strip LaTeX comments (% ...) before parsing metadata and body
-        uncommented_content = re.sub(r'%\s*\n', '\n', full_content)
-        uncommented_content = re.sub(r'%.*', '', uncommented_content)
+        # Strip LaTeX comments (% ...) before parsing metadata and body (preserving escaped \%)
+        uncommented_content = LatexParser._strip_latex_comments(full_content)
 
         udm = UniversalDocumentModel(source_format="LaTeX Project")
         warnings = []
@@ -320,12 +319,14 @@ class LatexParser:
                     lbl_match = re.search(r'\\label\{([^}]+)\}', tbl_str)
                     caption = cap_match.group(1).strip() if cap_match else ""
                     
-                    tab_match = re.search(r'\\begin\{tabular\}\{([^}]+)\}(.*?)\\end\{tabular\}', tbl_str, re.DOTALL)
+                    tab_match = re.search(r'\\begin\{tabular\}\s*\{((?:[^{}]|\{[^{}]*\})+)\}(.*?)\\end\{tabular\}', tbl_str, re.DOTALL)
                     rows = []
                     headers = []
+                    col_spec = None
                     if tab_match:
+                        col_spec = tab_match.group(1).strip()
                         raw_tab = tab_match.group(2)
-                        raw_rows = [r.strip() for r in raw_tab.split(r'\\') if r.strip()]
+                        raw_rows = [r.strip() for r in re.split(r'\\\\', raw_tab) if r.strip()]
                         for r_idx, r_str in enumerate(raw_rows):
                             cell_list = []
                             for c in r_str.split('&'):
@@ -335,10 +336,10 @@ class LatexParser:
                                     c_placeholders.append(m_c.group(0))
                                     return f"___CELL_CITE_{len(c_placeholders)-1}___"
                                 c_str = re.sub(r'\\cite[a-zA-Z]*(?:\[[^\]]*\])*\{[^}]+\}', protect_cell_cite, c_str)
-                                c_str = re.sub(r'\\[a-zA-Z]+\{([^}]+)\}', r'\1', c_str)
+                                c_str = re.sub(r'\\(?!begin\b|end\b)[a-zA-Z]+\{([^}]+)\}', r'\1', c_str)
                                 c_str = re.sub(r'\\(?:textbf|textit|emph|hline|toprule|midrule|bottomrule)', '', c_str).strip()
-                                for c_idx, orig_c in enumerate(c_placeholders):
-                                    c_str = c_str.replace(f"___CELL_CITE_{c_idx}___", orig_c)
+                                for c_idx in range(len(c_placeholders) - 1, -1, -1):
+                                    c_str = c_str.replace(f"___CELL_CITE_{c_idx}___", c_placeholders[c_idx])
                                 cell_list.append(c_str)
                             if r_idx == 0:
                                 headers = cell_list
@@ -349,6 +350,7 @@ class LatexParser:
                         id=f"tbl_{len(section_obj.blocks)+len(block_list)+1}",
                         caption=caption,
                         label=lbl_match.group(1) if lbl_match else None,
+                        col_spec=col_spec,
                         headers=headers,
                         rows=rows
                     ).model_dump()
@@ -390,11 +392,11 @@ class LatexParser:
                             clean_i = re.sub(r'\\(?:ref|pageref|eqref)\{[^}]+\}', protect_item_macro, clean_i)
                             clean_i = re.sub(r'\$[^$]+\$', protect_item_macro, clean_i)
                             
-                            clean_i = re.sub(r'\\[a-zA-Z]+\{([^}]+)\}', r'\1', clean_i)
+                            clean_i = re.sub(r'\\(?!begin\b|end\b)[a-zA-Z]+\{([^}]+)\}', r'\1', clean_i)
                             clean_i = re.sub(r'\\(?:textbf|textit|emph|textrm|sf|tt|large|small|noindent)', '', clean_i).strip()
                             
-                            for p_idx, orig_macro in enumerate(i_placeholders):
-                                clean_i = clean_i.replace(f"___ITEM_MACRO_{p_idx}___", orig_macro)
+                            for p_idx in range(len(i_placeholders) - 1, -1, -1):
+                                clean_i = clean_i.replace(f"___ITEM_MACRO_{p_idx}___", i_placeholders[p_idx])
                             items.append({"text": clean_i})
                             
                     if items:
@@ -406,7 +408,7 @@ class LatexParser:
                         })
                     
                 # Clean text paragraphs while preserving in-text citations (\cite, \citep, \citet), refs, and math
-                clean_p_text = re.sub(r'\\begin\{(?:figure|table|equation|align|strip|itemize|enumerate)[*]?\}.*?\\end\{(?:figure|table|equation|align|strip|itemize|enumerate)[*]?\}', '', text_block, flags=re.DOTALL)
+                clean_p_text = re.sub(r'\\begin\{(?:figure|table|equation|align|strip|itemize|enumerate|center|minipage)[*]?\}.*?\\end\{(?:figure|table|equation|align|strip|itemize|enumerate|center|minipage)[*]?\}', '', text_block, flags=re.DOTALL)
                 clean_p_text = re.sub(r'\\item\b', '', clean_p_text)
                 clean_p_text = re.sub(r'\\includegraphics(?:\[[^\]]*\])?\{[^}]+\}', '', clean_p_text)
                 clean_p_text = re.sub(r'\\caption(?:of\{figure\})?\{[^}]+\}', '', clean_p_text)
@@ -428,13 +430,13 @@ class LatexParser:
                 # Protect inline math ($...$)
                 clean_p_text = re.sub(r'\$[^$]+\$', protect_macro, clean_p_text)
                 
-                # Clean remaining formatting macros
-                clean_p_text = re.sub(r'\\[a-zA-Z]+\{([^}]+)\}', r'\1', clean_p_text)
+                # Clean remaining formatting macros without unwrapping \begin / \end environment macros
+                clean_p_text = re.sub(r'\\(?!begin\b|end\b)[a-zA-Z]+\{([^}]+)\}', r'\1', clean_p_text)
                 clean_p_text = re.sub(r'\\(?:textbf|textit|emph|textrm|sf|tt|large|small|noindent)', '', clean_p_text).strip()
                 
-                # Restore protected citations, refs, and math
-                for p_idx, orig_macro in enumerate(placeholders):
-                    clean_p_text = clean_p_text.replace(f"___MACRO_HOLDER_{p_idx}___", orig_macro)
+                # Restore protected citations, refs, and math in REVERSE ORDER to avoid index substring collision
+                for p_idx in range(len(placeholders) - 1, -1, -1):
+                    clean_p_text = clean_p_text.replace(f"___MACRO_HOLDER_{p_idx}___", placeholders[p_idx])
                 
                 paras = [p.strip() for p in clean_p_text.split("\n\n") if len(p.strip()) > 15]
                 for p in paras:
@@ -481,3 +483,15 @@ class LatexParser:
                     except Exception:
                         pass
         return None, None
+
+    @staticmethod
+    def _strip_latex_comments(text: str) -> str:
+        lines = text.splitlines()
+        clean_lines = []
+        for line in lines:
+            m = re.search(r'(?<!\\)(?:\\\\)*%', line)
+            if m:
+                clean_lines.append(line[:m.start()].rstrip())
+            else:
+                clean_lines.append(line)
+        return '\n'.join(clean_lines)

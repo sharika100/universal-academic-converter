@@ -72,8 +72,17 @@ class TemplateValidator:
             bib_name = bib_ref_m.group(1).strip()
             if not bib_name.endswith(".bib"):
                 bib_name += ".bib"
-            if not os.path.exists(os.path.join(output_dir, bib_name)):
+            bib_path = os.path.join(output_dir, bib_name)
+            if not os.path.exists(bib_path):
                 errors.append(f"Validation Failure: Referenced bibliography file '{bib_name}' missing in output directory.")
+            else:
+                # 15. BibTeX mismatched braces check
+                with open(bib_path, "r", encoding="utf-8", errors="ignore") as bfh:
+                    bib_content = bfh.read()
+                if bib_content.count('{') != bib_content.count('}'):
+                    errors.append(f"Validation Failure: Mismatched braces in {bib_name} (open: {bib_content.count('{')}, close: {bib_content.count('}')}).")
+                if "___MACRO_HOLDER_" in bib_content:
+                    errors.append(f"Validation Failure: Unresolved macro placeholder '___MACRO_HOLDER_' detected in {bib_name}.")
 
         # 5. Check no structural label leaks in text (e.g. sec:introduction as body text)
         label_leaks = re.findall(r'\n\s*(?:sec|fig|tab|eq):[a-zA-Z0-9_-]+\s*\n', main_content)
@@ -99,5 +108,41 @@ class TemplateValidator:
         udm_figs_count = sum(1 for s in udm.sections for b in s.blocks if b.get('type') == 'figure')
         if udm_figs_count > 0 and len(rendered_figs) < udm_figs_count:
             errors.append(f"Validation Failure: Rendered figure count ({len(rendered_figs)}) is less than UDM figures count ({udm_figs_count}).")
+
+        # 10. Check for unresolved macro placeholders in main.tex
+        if "___MACRO_HOLDER_" in main_content:
+            errors.append("Validation Failure: Unresolved macro placeholder '___MACRO_HOLDER_' detected in main.tex.")
+
+        # 11. Check for standalone environment names in main.tex
+        standalone_envs = re.findall(r'^\s*(center|minipage|itemize|enumerate)\s*$', main_content, re.MULTILINE)
+        if standalone_envs:
+            errors.append(f"Validation Failure: Standalone environment keyword(s) detected as body text: {set(standalone_envs)}")
+
+        # 12. Check for malformed tabular col spec emitted in body text
+        if re.search(r'\\begin\{tabular\}\s*\{[^\}]*\}\s*\n\s*\\toprule\s*\n\s*p\{', main_content):
+            errors.append("Validation Failure: Malformed tabular column specification emitted in table body text.")
+
+        # 13. Check for corrupted math backslash macro splits (e.g. $11.12\ without trailing macro or symbol)
+        corrupted_math = re.findall(r'\$[0-9\.\,\s]+\\(?=[$& \n\t]|$)', main_content)
+        if corrupted_math:
+            errors.append(f"Validation Failure: Corrupted math backslash trailing expression detected: {corrupted_math[:3]}")
+
+        # 14. Check for orphan \item commands outside list environments
+        lines = main_content.splitlines()
+        env_stack = []
+        orphan_items = 0
+        for line in lines:
+            for m in re.finditer(r'\\(begin|end)\{([^}]+)\}', line):
+                kind, env_name = m.groups()
+                if kind == 'begin':
+                    env_stack.append(env_name)
+                elif kind == 'end':
+                    if env_stack and env_stack[-1] == env_name:
+                        env_stack.pop()
+            if r'\item' in line:
+                if not any(env in ['itemize', 'enumerate', 'description'] for env in env_stack):
+                    orphan_items += 1
+        if orphan_items > 0:
+            errors.append(f"Validation Failure: {orphan_items} orphan \\item command(s) detected outside list environments.")
 
         return len(errors) == 0, errors

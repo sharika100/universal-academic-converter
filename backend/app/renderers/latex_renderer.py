@@ -285,7 +285,8 @@ class LatexRenderer:
                     headers = blk.get("headers", [])
                     rows = blk.get("rows", [])
                     num_cols = len(headers) if headers else (len(rows[0]) if rows else 1)
-                    cols_fmt = "c" * num_cols
+                    col_spec = blk.get("col_spec")
+                    cols_fmt = col_spec if col_spec else ("c" * num_cols)
                     lines.append(f"  \\begin{{tabular}}{{{cols_fmt}}}")
                     lines.append("    \\toprule")
                     if headers:
