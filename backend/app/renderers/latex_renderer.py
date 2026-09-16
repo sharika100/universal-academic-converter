@@ -25,25 +25,16 @@ class LatexRenderer:
         os.makedirs(output_dir, exist_ok=True)
         created_files = []
         
-        # 1. Copy required target template infrastructure files and flatten .cls/.sty/.bst to root
+        # 1. Copy required target template infrastructure files and flatten directly into output_dir root
         if dest_template_dir and os.path.exists(dest_template_dir):
             for root, _, files in os.walk(dest_template_dir):
                 for f in files:
                     ext = os.path.splitext(f)[1].lower()
-                    rel_p = os.path.relpath(os.path.join(root, f), dest_template_dir)
-                    
                     if ext in [".cls", ".sty", ".bst", ".png", ".jpg", ".jpeg", ".eps", ".pdf"] or f.endswith(".bib"):
-                        dest_file_path = os.path.join(output_dir, rel_p)
-                        os.makedirs(os.path.dirname(dest_file_path), exist_ok=True)
+                        dest_file_path = os.path.join(output_dir, f)
                         shutil.copy2(os.path.join(root, f), dest_file_path)
-                        created_files.append(rel_p.replace("\\", "/"))
-                        
-                        # Flatten infrastructure files (.cls, .sty, .bst) to root output_dir
-                        if ext in [".cls", ".sty", ".bst"]:
-                            root_file_path = os.path.join(output_dir, f)
-                            shutil.copy2(os.path.join(root, f), root_file_path)
-                            if f not in created_files:
-                                created_files.append(f)
+                        if f not in created_files:
+                            created_files.append(f)
 
         # 2. Prepare figures directory and write every distinct figure / equation image from UDM
         fig_dir = os.path.join(output_dir, "figures")

@@ -42,11 +42,13 @@ class TemplateValidator:
             main_content = fh.read()
 
         # 1. documentclass
-        doc_cls_m = re.search(r'\\documentclass(?:\[[^\]]*\])?\{([^}]+)\}', main_content)
-        if not doc_cls_m:
+        doc_cls_matches = re.findall(r'\\documentclass(?:\[[^\]]*\])?\{([^}]+)\}', main_content)
+        if not doc_cls_matches:
             errors.append("Validation Failure: main.tex has no valid \\documentclass statement.")
+        elif len(doc_cls_matches) > 1:
+            errors.append(f"Validation Failure: main.tex contains {len(doc_cls_matches)} \\documentclass statements (expected 1). Source preamble leakage detected.")
         else:
-            cls_name = doc_cls_m.group(1).strip()
+            cls_name = doc_cls_matches[0].strip()
             # 2. Check if .cls file exists
             cls_file_exists = any(
                 os.path.exists(os.path.join(output_dir, p))
@@ -54,6 +56,14 @@ class TemplateValidator:
             )
             if not cls_file_exists and cls_name not in ["article", "report", "book"]:
                 errors.append(f"Validation Failure: Document class file '{cls_name}.cls' not found in output directory.")
+
+        # Check document environment structure counts
+        b_doc_cnt = len(re.findall(r'\\begin\{document\}', main_content))
+        e_doc_cnt = len(re.findall(r'\\end\{document\}', main_content))
+        if b_doc_cnt != 1:
+            errors.append(f"Validation Failure: main.tex contains {b_doc_cnt} \\begin{{document}} statements (expected 1).")
+        if e_doc_cnt != 1:
+            errors.append(f"Validation Failure: main.tex contains {e_doc_cnt} \\end{{document}} statements (expected 1).")
 
         # 3. Check \includegraphics references
         img_refs = re.findall(r'\\includegraphics(?:\[.*?\])?\{([^}]+)\}', main_content)
