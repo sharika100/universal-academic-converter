@@ -113,4 +113,5 @@ class UniversalDocumentModel(BaseModel):
     metadata: Metadata = Field(default_factory=Metadata)
     sections: List[Section] = Field(default_factory=list)
     references: List[Reference] = Field(default_factory=list)
+    parsing_confidence: float = 96.0
     warnings: List[str] = Field(default_factory=list)

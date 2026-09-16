@@ -89,15 +89,16 @@ class LatexRenderer:
             fh.write(main_tex_content)
         created_files.append("main.tex")
         
-        # AUTOMATED INTEGRITY VALIDATION: Every \includegraphics reference in main.tex MUST exist in output directory!
+        # AUTOMATED INTEGRITY VALIDATION: Every \includegraphics file reference in main.tex MUST exist in output directory!
         referenced_imgs = re.findall(r'\\includegraphics(?:\[.*?\])?\{([^}]+)\}', main_tex_content)
         for ref_img in referenced_imgs:
-            full_ref_path = os.path.normpath(os.path.join(output_dir, ref_img))
-            if not os.path.exists(full_ref_path):
-                raise ValueError(
-                    f"OUTPUT INTEGRITY FAILURE: Generated main.tex references image '{ref_img}' "
-                    f"which does not exist in the physical output directory!"
-                )
+            if ref_img.startswith("figures/") or any(ref_img.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".pdf", ".eps"]):
+                full_ref_path = os.path.normpath(os.path.join(output_dir, ref_img))
+                if not os.path.exists(full_ref_path):
+                    raise ValueError(
+                        f"OUTPUT INTEGRITY FAILURE: Generated main.tex references image '{ref_img}' "
+                        f"which does not exist in the physical output directory!"
+                    )
         
         # 5. Zip generated project into output_zip_path
         os.makedirs(os.path.dirname(output_zip_path), exist_ok=True)

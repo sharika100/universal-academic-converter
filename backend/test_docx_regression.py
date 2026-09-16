@@ -148,6 +148,23 @@ def run_regression_tests():
         print("[PASS] TEST 7: Actual Malayalam manuscript fixture verification PASSED!")
 
     # -------------------------------------------------------------
+    # TEST 8: V2 Malayalam Movie Recommendation Manuscript
+    # -------------------------------------------------------------
+    v2_manuscript_path = r"C:\Users\shari\Downloads\V2 NEW CODE Explainable Aspect-Sentiment Framework for Personalized Malayalam Movie Recommendation.docx"
+    if os.path.exists(v2_manuscript_path):
+        udm_v2 = DocxParser.parse(v2_manuscript_path)
+        assert udm_v2.metadata.title == "Explainable Aspect-Sentiment Framework for Personalized Malayalam Movie Recommendation"
+        assert len(udm_v2.metadata.authors) == 0, f"Expected 0 header authors for V2 manuscript, got {len(udm_v2.metadata.authors)}"
+        assert len(udm_v2.sections) >= 1, "Expected at least 1 section in V2 manuscript"
+        
+        # Verify emails absent from body paragraph blocks
+        body_paras = [b["text"] for sec in udm_v2.sections for b in sec.blocks if isinstance(b, dict) and b.get("type") == "paragraph"]
+        for p_text in body_paras:
+            assert "sharikat@karunya.edu" not in p_text and "juliapunitha@karunya.edu" not in p_text, "Author email leaked into body paragraphs!"
+            
+        print("[PASS] TEST 8: V2 Malayalam movie recommendation manuscript verification PASSED!")
+
+    # -------------------------------------------------------------
     # TEST COMPLETE PIPELINE (DOCX -> UDM -> TEMPLATE -> LATEX -> PDF)
     # -------------------------------------------------------------
     spec = TemplateSpecification(format_type="latex", author_style="springer", document_class="sn-jnl")

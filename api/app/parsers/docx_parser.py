@@ -205,8 +205,8 @@ class DocxParser:
                 udm.metadata.keywords = [k.strip() for k in re.split(r'[,;]', kw_str) if k.strip()]
                 return
 
-            # Table paragraphs must not create section headings
-            if is_inside_table:
+            # Table paragraphs / table captions must not create section headings
+            if is_inside_table or text.lower().startswith("table"):
                 return
                 
             # Check for Headings with Strict Hierarchy (Level 1 vs Level 2 vs Level 3)
@@ -324,12 +324,31 @@ class DocxParser:
                     caption=f"Table {len(current_section.blocks)+1}"
                 )
                 current_section.blocks.append(tbl_obj.model_dump())
-
         if current_section.blocks:
             sections.append(current_section)
             
         udm.sections = sections if sections else [Section(title="Main Content", level=1, blocks=[Paragraph(text="Content extracted").model_dump()])]
         
+        # Strict boundary type validation before returning UDM
+        if not isinstance(udm.metadata.authors, list):
+            raise TypeError(f"UDM Boundary Validation Failed: metadata.authors must be list, got {type(udm.metadata.authors).__name__}")
+        for idx, a in enumerate(udm.metadata.authors):
+            if not isinstance(a, Author):
+                raise TypeError(f"UDM Boundary Validation Failed: metadata.authors[{idx}] must be Author, got {type(a).__name__}")
+                
+        if not isinstance(udm.sections, list):
+            raise TypeError(f"UDM Boundary Validation Failed: sections must be list, got {type(udm.sections).__name__}")
+        for s_idx, sec in enumerate(udm.sections):
+            if not isinstance(sec, Section):
+                raise TypeError(f"UDM Boundary Validation Failed: sections[{s_idx}] must be Section, got {type(sec).__name__}")
+            if not isinstance(sec.blocks, list):
+                raise TypeError(f"UDM Boundary Validation Failed: sections[{s_idx}].blocks must be list, got {type(sec.blocks).__name__}")
+            for b_idx, blk in enumerate(sec.blocks):
+                if not isinstance(blk, dict):
+                    raise TypeError(f"UDM Boundary Validation Failed: sections[{s_idx}].blocks[{b_idx}] must be dict, got {type(blk).__name__}")
+                if "type" not in blk:
+                    raise ValueError(f"UDM Boundary Validation Failed: sections[{s_idx}].blocks[{b_idx}] missing required 'type' field")
+            
         if not udm.metadata.authors:
             warnings.append("Header author metadata was not deterministically structured; preserving original header text.")
         if not udm.metadata.affiliations:
@@ -430,11 +449,14 @@ class DocxParser:
         role_kw = ["research scholar", "professor", "associate professor", "assistant professor", "lecturer", "scholar", "student", "engineer", "researcher", "scientist", "member, ieee", "senior member", "fellow, ieee", "head", "dean", "director", "chair"]
         inst_kw = ["department", "university", "institute", "college", "school", "laboratory", "center", "centre", "dept", "inc", "ltd", "corp", "technology", "sciences", "engineering"]
         loc_patterns = [r'\bcoimbatore\b', r'\bchennai\b', r'\bbangalore\b', r'\bmumbai\b', r'\bdelhi\b', r'\btamil nadu\b', r'\bkerala\b', r'\bindia\b', r'\busa\b', r'\buk\b', r'\bcalifornia\b', r'\bca\b', r'\bma\b', r'\bny\b']
-        ignore_prefix = ("abstract", "keyword", "intro", "table", "fig", "reference", "index terms")
+        ignore_prefix = ("abstract", "keyword", "intro", "table", "fig", "reference", "index terms", "\\begin", "\\end", "\\sep")
+        prose_kw = ["recommendation", "framework", "evaluation", "precision", "recall", "analysis", "dataset", "approach", "methodology", "sentiment", "performance", "experiment", "result", "study", "paper"]
         
         def classify_line(s: str) -> str:
             sl = s.lower().strip()
-            if not sl or sl.startswith(ignore_prefix):
+            if not sl or sl.startswith(ignore_prefix) or len(sl) > 200:
+                return "ignore"
+            if any(w in sl for w in prose_kw):
                 return "ignore"
             if "@" in s or sl.startswith("email"):
                 return "email"
