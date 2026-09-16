@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import base64
 import zipfile
@@ -35,7 +36,7 @@ class LatexRenderer:
                         shutil.copy2(os.path.join(root, f), dest_file_path)
                         created_files.append(rel_p.replace("\\", "/"))
 
-        # 2. Prepare figures directory and write every distinct figure image from UDM
+        # 2. Prepare figures directory and write every distinct figure / equation image from UDM
         fig_dir = os.path.join(output_dir, "figures")
         os.makedirs(fig_dir, exist_ok=True)
         
@@ -49,14 +50,14 @@ class LatexRenderer:
                     b64_data = blk.get("image_data_b64")
                     raw_fname = blk.get("image_filename")
                     
-                    if not raw_fname or raw_fname in written_fig_names or raw_fname == "fig.png":
-                        raw_fname = f"figure_{fig_idx}.png"
-                        blk["image_filename"] = raw_fname
-                        
-                    written_fig_names.add(raw_fname)
-                    fig_idx += 1
-                    
                     if b64_data:
+                        if not raw_fname or raw_fname in written_fig_names or raw_fname == "fig.png":
+                            raw_fname = f"figure_{fig_idx}.png"
+                            blk["image_filename"] = raw_fname
+                            
+                        written_fig_names.add(raw_fname)
+                        fig_idx += 1
+                        
                         try:
                             img_path = os.path.join(fig_dir, raw_fname)
                             with open(img_path, "wb") as fh:
@@ -88,6 +89,16 @@ class LatexRenderer:
             fh.write(main_tex_content)
         created_files.append("main.tex")
         
+        # AUTOMATED INTEGRITY VALIDATION: Every \includegraphics reference in main.tex MUST exist in output directory!
+        referenced_imgs = re.findall(r'\\includegraphics(?:\[.*?\])?\{([^}]+)\}', main_tex_content)
+        for ref_img in referenced_imgs:
+            full_ref_path = os.path.normpath(os.path.join(output_dir, ref_img))
+            if not os.path.exists(full_ref_path):
+                raise ValueError(
+                    f"OUTPUT INTEGRITY FAILURE: Generated main.tex references image '{ref_img}' "
+                    f"which does not exist in the physical output directory!"
+                )
+        
         # 5. Zip generated project into output_zip_path
         os.makedirs(os.path.dirname(output_zip_path), exist_ok=True)
         with zipfile.ZipFile(output_zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -114,7 +125,7 @@ class LatexRenderer:
             opts = f"[{','.join(spec.class_options)}]" if spec.class_options else ""
             cls = spec.document_class or "article"
             lines.append(f"\\documentclass{opts}{{{cls}}}")
-            lines.append("\\usepackage{graphicx}")
+            lines.append("\\package{graphicx}")
             lines.append("\\usepackage{amsmath,amssymb}")
             lines.append("\\usepackage{booktabs}")
             lines.append("\\usepackage{url}")

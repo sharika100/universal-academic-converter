@@ -141,7 +141,10 @@ class DocxParser:
                     if is_equation_image:
                         current_section.blocks.append(Equation(
                             math_latex=f"\\includegraphics[max width=0.8\\linewidth]{{figures/{fname}}}",
-                            label=f"eq_{occurrence_counter}"
+                            label=f"eq_{occurrence_counter}",
+                            image_filename=fname,
+                            image_data_b64=img_info["b64"],
+                            sha256=img_info["sha256"]
                         ).model_dump())
                     else:
                         fig_obj = Figure(
@@ -202,30 +205,45 @@ class DocxParser:
                 udm.metadata.keywords = [k.strip() for k in re.split(r'[,;]', kw_str) if k.strip()]
                 return
 
-            # Table paragraphs must not create section headings
-            if is_inside_table:
+            # Table paragraphs / table captions must not create section headings
+            if is_inside_table or text.lower().startswith("table"):
                 return
                 
-            # Check for Headings with Strict Numbering & Style Filters
+            # Check for Headings with Strict Hierarchy (Level 1 vs Level 2 vs Level 3)
             is_heading = False
             heading_level = 1
-            if "heading 1" in style_name:
+            clean_title = text
+            
+            m_lvl1 = re.match(r'^(?:\d+|[IVXLCDM]+)\.\s+([A-Za-z].*)$', text)
+            m_lvl2 = re.match(r'^[A-Z]\.\s+([A-Za-z].*)$', text)
+            m_lvl3 = re.match(r'^\d+\.\d+\.\s+([A-Za-z].*)$', text)
+            
+            if m_lvl3:
+                is_heading = True
+                heading_level = 3
+                clean_title = m_lvl3.group(1).strip()
+            elif m_lvl2:
+                is_heading = True
+                heading_level = 2
+                clean_title = m_lvl2.group(1).strip()
+            elif m_lvl1:
                 is_heading = True
                 heading_level = 1
+                clean_title = m_lvl1.group(1).strip()
+            elif "heading 1" in style_name:
+                is_heading = True
+                heading_level = 1
+                clean_title = re.sub(r'^\d+[\.\s]+', '', text).strip()
             elif "heading 2" in style_name:
                 is_heading = True
                 heading_level = 2
+                clean_title = re.sub(r'^[A-Z]\.[\s]*', '', text).strip()
             elif "heading 3" in style_name:
                 is_heading = True
                 heading_level = 3
-            elif elem_idx >= first_heading_idx and len(text) < 60:
-                # Require explicit section numbering pattern followed by text
-                if bool(re.match(r'^(?:\d+|[A-Z]|[IVXLCDM]+)\.\s+[A-Za-z]', text)):
-                    is_heading = True
-                    heading_level = 1
+                clean_title = text
                 
             if is_heading:
-                clean_title = re.sub(r'^\d+[\.\s]*', '', text).strip() or text
                 if clean_title.lower() in ["references", "bibliography"]:
                     references_found = True
                     return

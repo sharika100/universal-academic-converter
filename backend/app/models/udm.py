@@ -55,6 +55,9 @@ class Equation(BaseModel):
     label: Optional[str] = None
     number: Optional[str] = None
     display_mode: str = "block"  # block or inline
+    image_filename: Optional[str] = None
+    image_data_b64: Optional[str] = None
+    sha256: Optional[str] = None
 
 class Figure(BaseModel):
     type: str = "figure"
@@ -98,28 +101,16 @@ class Section(BaseModel):
 class Reference(BaseModel):
     id: str
     cite_key: str
-    entry_type: str = "article"
-    title: str
+    title: Optional[str] = None
     authors: List[str] = Field(default_factory=list)
     journal: Optional[str] = None
-    booktitle: Optional[str] = None
     year: Optional[str] = None
-    volume: Optional[str] = None
-    number: Optional[str] = None
-    pages: Optional[str] = None
-    publisher: Optional[str] = None
-    doi: Optional[str] = None
-    url: Optional[str] = None
     raw_bibtex: Optional[str] = None
 
 class UniversalDocumentModel(BaseModel):
+    version: str = "1.0"
+    source_format: str = "DOCX"
     metadata: Metadata = Field(default_factory=Metadata)
     sections: List[Section] = Field(default_factory=list)
-    acknowledgements: Optional[str] = None
-    appendices: List[Section] = Field(default_factory=list)
     references: List[Reference] = Field(default_factory=list)
-    cross_references: Dict[str, str] = Field(default_factory=dict)
-    conversion_mode: str = "FORMAT_ONLY"
-    parsing_confidence: float = 96.0
     warnings: List[str] = Field(default_factory=list)
-    source_format: str = "unknown"
