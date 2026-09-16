@@ -157,10 +157,45 @@ export const App: React.FC = () => {
         console.log(`Source file size (${(sourceFile.size / 1024 / 1024).toFixed(2)} MB) exceeds 3.5 MB threshold. Uploading directly to Private Vercel Blob Storage...`);
         try {
           const srcHash = await calculateSHA256(sourceFile);
-          const blob = await upload(sourceFile.name, sourceFile, {
-            access: 'private',
-            handleUploadUrl: '/api/upload-token',
+          
+          // Obtain signed upload URL and perform direct PUT to Private Vercel Blob
+          const authRes = await fetch('/api/upload-token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              filename: sourceFile.name,
+              contentType: sourceFile.type || 'application/octet-stream'
+            })
           });
+
+          if (!authRes.ok) {
+            const errJson = await authRes.json().catch(() => ({}));
+            throw new Error(errJson.detail || errJson.message || `Storage authorization failed (HTTP ${authRes.status})`);
+          }
+
+          const authData = await authRes.json();
+          let finalBlobUrl = authData.blobUrl;
+
+          if (authData.uploadUrl) {
+            console.log("Directly uploading source manuscript payload to Vercel Blob signed URL...");
+            const putRes = await fetch(authData.uploadUrl, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': sourceFile.type || 'application/octet-stream'
+              },
+              body: sourceFile
+            });
+
+            if (!putRes.ok) {
+              throw new Error(`Direct Blob storage upload failed with HTTP status ${putRes.status}`);
+            }
+          } else {
+            const blob = await upload(sourceFile.name, sourceFile, {
+              access: 'private',
+              handleUploadUrl: '/api/upload-token',
+            });
+            finalBlobUrl = blob.url;
+          }
 
           setActiveEndpoint('/api/analyze-source-from-storage');
           srcRes = await fetch('/api/analyze-source-from-storage', {
@@ -168,7 +203,7 @@ export const App: React.FC = () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               upload_id: `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-              blob_url: blob.url,
+              blob_url: finalBlobUrl,
               filename: sourceFile.name,
               sha256: srcHash,
               selected_entrypoint: overrideEntrypoint || selectedEntrypoint,
@@ -248,10 +283,44 @@ export const App: React.FC = () => {
       if (destFile.size > LARGE_FILE_THRESHOLD) {
         try {
           const destHash = await calculateSHA256(destFile);
-          const blob = await upload(destFile.name, destFile, {
-            access: 'private',
-            handleUploadUrl: '/api/upload-token',
+          
+          const authRes = await fetch('/api/upload-token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              filename: destFile.name,
+              contentType: destFile.type || 'application/octet-stream'
+            })
           });
+
+          if (!authRes.ok) {
+            const errJson = await authRes.json().catch(() => ({}));
+            throw new Error(errJson.detail || errJson.message || `Storage authorization failed (HTTP ${authRes.status})`);
+          }
+
+          const authData = await authRes.json();
+          let finalBlobUrl = authData.blobUrl;
+
+          if (authData.uploadUrl) {
+            console.log("Directly uploading template payload to Vercel Blob signed URL...");
+            const putRes = await fetch(authData.uploadUrl, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': destFile.type || 'application/octet-stream'
+              },
+              body: destFile
+            });
+
+            if (!putRes.ok) {
+              throw new Error(`Direct Blob template storage upload failed with HTTP status ${putRes.status}`);
+            }
+          } else {
+            const blob = await upload(destFile.name, destFile, {
+              access: 'private',
+              handleUploadUrl: '/api/upload-token',
+            });
+            finalBlobUrl = blob.url;
+          }
 
           setActiveEndpoint('/api/analyze-template-from-storage');
           destRes = await fetch('/api/analyze-template-from-storage', {
@@ -259,7 +328,7 @@ export const App: React.FC = () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               job_id: srcJson.job_id,
-              blob_url: blob.url,
+              blob_url: finalBlobUrl,
               filename: destFile.name,
               sha256: destHash
             })
