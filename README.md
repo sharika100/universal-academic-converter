@@ -157,3 +157,12 @@ universal-academic-converter/
 ## ⚖️ License
 
 MIT License. Designed for academic research and publication workflows.
+
+---
+
+## Developer
+
+**Sharika T R**  
+Department of CSE  
+Adi Shankara Institute of Engineering and Technology  
+Vidya Bharati Nagar, Mattor, Kalady
