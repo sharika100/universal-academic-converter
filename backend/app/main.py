@@ -795,6 +795,20 @@ async def convert_document(
             output_dir=os.path.join(output_dir, "latex_proj"),
             output_zip_path=output_zip_path
         )
+
+        is_valid_proj, val_errs = TemplateValidator.validate_rendered_project(
+            output_dir=os.path.join(output_dir, "latex_proj"),
+            udm=udm
+        )
+        if not is_valid_proj:
+            logger.error(f"[{ref_id}] Rendered project validation failed: {val_errs}")
+            return JSONResponse(status_code=400, content=create_error_payload(
+                stage="conversion",
+                error_code="CONVERSION_VALIDATION_ERROR",
+                message="Rendered target project failed structural integrity validation.",
+                detail="; ".join(val_errs),
+                ref_id=ref_id
+            ))
         
         entrypoint = "main.tex"
         compiled, sandbox_log = LatexSandbox.compile_project(

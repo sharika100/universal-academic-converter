@@ -22,29 +22,33 @@ class LatexParser:
         main_tex_path = os.path.join(project_dir, entrypoint_rel)
         full_content = LatexParser._resolve_includes(main_tex_path, project_dir)
         
+        # Strip LaTeX comments (% ...) before parsing metadata and body
+        uncommented_content = re.sub(r'%\s*\n', '\n', full_content)
+        uncommented_content = re.sub(r'%.*', '', uncommented_content)
+
         udm = UniversalDocumentModel(source_format="LaTeX Project")
         warnings = []
         
         # 1. Parse Metadata (Title, Authors, Affiliations, Abstract, Keywords)
-        udm.metadata = LatexParser._parse_metadata(full_content)
+        udm.metadata = LatexParser._parse_metadata(uncommented_content)
         
         # 2. Parse Bibliography / .bib file
-        bib_references = LatexParser._parse_bib_files(project_dir, full_content)
+        bib_references = LatexParser._parse_bib_files(project_dir, uncommented_content)
         udm.references = bib_references
         
         # 3. Extract Acknowledgements & Appendices
-        ack_m = re.search(r'\\begin\{acknowledgements?\}(.*?)\\end\{acknowledgements?\}', full_content, re.DOTALL | re.I)
+        ack_m = re.search(r'\\begin\{acknowledgements?\}(.*?)\\end\{acknowledgements?\}', uncommented_content, re.DOTALL | re.I)
         if ack_m:
             udm.acknowledgements = ack_m.group(1).strip()
             
         # 4. Parse Sections, Paragraphs, Equations, Figures, Tables
-        sections, parsed_warnings = LatexParser._parse_body(full_content, project_dir)
+        sections, parsed_warnings = LatexParser._parse_body(uncommented_content, project_dir)
         udm.sections = sections
         udm.warnings.extend(parsed_warnings)
         
         # 5. Extract Custom Packages & Commands
-        packages = re.findall(r'\\usepackage(?:\[[^\]]*\])?\{([^}]+)\}', full_content)
-        custom_cmds = re.findall(r'\\(?:newcommand|def)\{\\([a-zA-Z]+)\}', full_content)
+        packages = re.findall(r'\\usepackage(?:\[[^\]]*\])?\{([^}]+)\}', uncommented_content)
+        custom_cmds = re.findall(r'\\(?:newcommand|def)\{\\([a-zA-Z]+)\}', uncommented_content)
         if custom_cmds:
             udm.warnings.append(f"Custom commands detected: \\{', \\'.join(custom_cmds[:4])}")
             
@@ -87,18 +91,19 @@ class LatexParser:
         metadata = Metadata()
         
         # Title
-        title_match = re.search(r'\\title(?:\[[^\]]*\])?\{([^}]+)\}', content, re.DOTALL)
+        title_match = re.search(r'\\title\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}', content, re.DOTALL)
         if title_match:
             raw_t = title_match.group(1).strip()
+            raw_t = re.sub(r'\\(?:tnoteref|fnref|corref|thanks|label)\{[^}]*\}', '', raw_t)
             clean_t = re.sub(r'\\[a-zA-Z]+\{([^}]+)\}', r'\1', raw_t)
             clean_t = re.sub(r'\\[a-zA-Z]+', '', clean_t).strip()
-            metadata.title = clean_t
+            if clean_t and clean_t.lower() not in ["untitled document", "template", "sample"]:
+                metadata.title = clean_t
             
-        # Authors & Affiliations (IEEE, Springer, Elsevier, ACM, Standard formats)
         authors = []
         affiliations = []
         
-        # IEEE format (\author{\IEEEauthorblockN{Name}\IEEEauthorblockA{Affil}})
+        # 1. IEEE format (\author{\IEEEauthorblockN{Name}\IEEEauthorblockA{Affil}})
         ieee_authors = re.findall(r'\\IEEEauthorblockN\{([^}]+)\}', content)
         ieee_affils = re.findall(r'\\IEEEauthorblockA\{([^}]+)\}', content)
         if ieee_authors:
@@ -108,21 +113,68 @@ class LatexParser:
                 if idx < len(ieee_affils):
                     affiliations.append(Affiliation(id=affil_id, institution=ieee_affils[idx].strip()))
         else:
-            # Springer / standard format (\author{Name}, \institute{Affil})
-            author_matches = re.findall(r'\\author(?:\[[^\]]*\])?\{([^}]+)\}', content)
-            for a_str in author_matches:
-                clean_name = re.sub(r'\\(?:fnm|sur|email|orcid)\{([^}]+)\}', r'\1', a_str)
-                clean_name = re.sub(r'\\[a-zA-Z]+', '', clean_name).strip()
-                if clean_name and len(clean_name) < 80:
-                    authors.append(Author(name=clean_name))
-                    
-            inst_matches = re.findall(r'\\(?:institute|orgname|affiliation)\{([^}]+)\}', content)
-            for idx, inst_str in enumerate(inst_matches):
-                clean_inst = re.sub(r'\\[a-zA-Z]+\{([^}]+)\}', r'\1', inst_str).strip()
-                affiliations.append(Affiliation(id=str(idx+1), institution=clean_inst))
+            # 2. Parse Affiliations first (Key-value or string macros)
+            affil_map = {}
+            
+            # Key-Value / Nested Macro Affiliations: \affiliation[id]{ organization={...}, addressline={...}, ... }
+            affil_macro_pattern = re.compile(r'\\(?:affiliation|address|institute)(?:\[([^\]]*)\])?\s*\{')
+            for m in affil_macro_pattern.finditer(content):
+                aff_id = m.group(1) or str(len(affil_map) + 1)
+                start_idx = m.end()
+                depth = 1
+                i = start_idx
+                while i < len(content) and depth > 0:
+                    if content[i] == '{':
+                        depth += 1
+                    elif content[i] == '}':
+                        depth -= 1
+                    i += 1
+                aff_body = content[start_idx:i-1]
                 
-        metadata.authors = authors if authors else [Author(name="Corresponding Author")]
-        metadata.affiliations = affiliations if affiliations else [Affiliation(id="1", institution="Academic Department")]
+                # Check for key-values
+                kv = dict(re.findall(r'(\w+)\s*=\s*\{([^}]+)\}', aff_body))
+                if kv:
+                    parts = [kv[k].strip() for k in ['organization', 'addressline', 'city', 'postcode', 'state', 'country'] if k in kv and kv[k].strip()]
+                    full_inst = ', '.join(parts) if parts else aff_body.strip()
+                else:
+                    full_inst = re.sub(r'\\[a-zA-Z]+\{([^}]+)\}', r'\1', aff_body)
+                    full_inst = re.sub(r'\\[a-zA-Z]+', '', full_inst).strip()
+                    
+                if full_inst and aff_id not in affil_map:
+                    affil_map[aff_id] = Affiliation(id=aff_id, institution=full_inst)
+                    
+            for aff_obj in affil_map.values():
+                affiliations.append(aff_obj)
+
+            # 3. Parse Authors: \author[aff_ids]{Name}
+            author_macro_pattern = re.compile(r'\\author(?:\[([^\]]*)\])?\s*\{([^}]+)\}')
+            seen_author_names = set()
+
+            for m in author_macro_pattern.finditer(content):
+                aff_tags = m.group(1) or ""
+                a_name_raw = m.group(2).strip()
+                
+                clean_name = re.sub(r'\\(?:fnm|sur|email|orcid|corref|fnref)\{([^}]+)\}', r'\1', a_name_raw)
+                clean_name = re.sub(r'\\[a-zA-Z]+', '', clean_name).strip()
+                clean_name = re.sub(r'[^a-zA-Z0-9\s.-]', '', clean_name).strip()
+                
+                name_lower = clean_name.lower()
+                placeholder_names = ["author name", "first author", "second author", "third author", "fourth author", "jane doe", "john doe", "author 1", "author 2", "sample author"]
+                
+                if clean_name and len(clean_name) < 80 and not any(p in name_lower for p in placeholder_names):
+                    # Check for duplicate names
+                    norm_key = re.sub(r'[^a-z]', '', name_lower)
+                    if norm_key not in seen_author_names:
+                        seen_author_names.add(norm_key)
+                        aff_ids = [t.strip() for t in aff_tags.split(',') if t.strip()]
+                        if not aff_ids and affiliations:
+                            aff_ids = [affiliations[0].id]
+                        authors.append(Author(name=clean_name, affiliation_ids=aff_ids))
+
+        if authors:
+            metadata.authors = authors
+        if affiliations:
+            metadata.affiliations = affiliations
         
         # Abstract
         abs_match = re.search(r'\\begin\{abstract\}(.*?)\\end\{abstract\}', content, re.DOTALL)
@@ -130,7 +182,7 @@ class LatexParser:
             metadata.abstract = abs_match.group(1).strip()
             
         # Keywords
-        kw_match = re.search(r'\\(?:keywords|begin\{keywords\})(.*?)(?:\\end\{keywords\}|\}\n|\}\r)', content, re.DOTALL)
+        kw_match = re.search(r'\\(?:keywords|begin\{keywords\})(.*?)(?:\\end\{keywords\}|\}\n|\}\r|\n\n)', content, re.DOTALL)
         if kw_match:
             kw_raw = kw_match.group(1).replace('{', '').replace('}', '').strip()
             metadata.keywords = [k.strip() for k in re.split(r'[,;•\n]', kw_raw) if k.strip()]
@@ -141,7 +193,6 @@ class LatexParser:
     def _parse_bib_files(base_dir: str, content: str) -> List[Reference]:
         references = []
         
-        # Find all .bib files in base_dir
         found_bib_paths = []
         for root, _, files in os.walk(base_dir):
             for f in files:
@@ -153,7 +204,7 @@ class LatexParser:
                 with open(bib_p, "r", encoding="utf-8", errors="ignore") as fh:
                     bib_text = fh.read()
                     
-                entries = re.findall(r'@(\w+)\s*\{\s*([^,\s]+)\s*,(.*?)\n\}', bib_text, re.DOTALL)
+                entries = re.findall(r'@(\w+)\s*\{\s*([^,\s]+)\s*,(.*?)(?=\n@|\Z)', bib_text, re.DOTALL)
                 for entry_type, cite_key, fields_str in entries:
                     title_m = re.search(r'title\s*=\s*[\"\{](.*?)[\"\}],', fields_str, re.I | re.DOTALL)
                     author_m = re.search(r'author\s*=\s*[\"\{](.*?)[\"\}],', fields_str, re.I | re.DOTALL)
@@ -171,7 +222,7 @@ class LatexParser:
                         authors=author_list,
                         journal=journal_m.group(1).strip() if journal_m else None,
                         year=year_m.group(1) if year_m else None,
-                        raw_bibtex=f"@{entry_type}{{{cite_key},\n{fields_str}\n}}"
+                        raw_bibtex=f"@{entry_type}{{{cite_key},\n{fields_str.strip()}\n}}"
                     ))
             except Exception:
                 pass
@@ -202,7 +253,11 @@ class LatexParser:
             sec_title = raw_sections[i].strip()
             sec_body = raw_sections[i+1] if i+1 < len(raw_sections) else ""
             
-            section_obj = Section(title=sec_title, level=1, blocks=[])
+            # Extract section label if present at start of sec_body
+            sec_lbl_m = re.match(r'\s*\\label\{([^}]+)\}', sec_body)
+            sec_label = sec_lbl_m.group(1) if sec_lbl_m else None
+            
+            section_obj = Section(title=sec_title, level=1, label=sec_label, blocks=[])
             
             # Subsections
             subsections = re.split(r'\\subsection\*?\{([^}]+)\}', sec_body)
@@ -218,25 +273,27 @@ class LatexParser:
                     else:
                         continue
                         
-                # Extract figures
-                fig_matches = re.findall(r'\\begin\{figure[*]?\}(.*?)\\end\{figure[*]?\}', text_block, re.DOTALL)
-                for fig_str in fig_matches:
-                    img_match = re.search(r'\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}', fig_str)
-                    cap_match = re.search(r'\\caption\{([^}]+)\}', fig_str)
-                    lbl_match = re.search(r'\\label\{([^}]+)\}', fig_str)
+                # Extract figures (\includegraphics)
+                img_matches = re.finditer(r'\\includegraphics(?:\[([^\]]*)\])?\{([^}]+)\}', text_block)
+                for m in img_matches:
+                    img_path = m.group(2).strip()
+                    pos = m.start()
+                    surrounding = text_block[max(0, pos-300):min(len(text_block), pos+400)]
                     
-                    img_path = img_match.group(1).strip() if img_match else "figure.png"
-                    caption = cap_match.group(1).strip() if cap_match else ""
-                    label = lbl_match.group(1).strip() if lbl_match else None
+                    cap_m = re.search(r'\\caption(?:of\{figure\})?\{([^}]+)\}', surrounding)
+                    lbl_m = re.search(r'\\label\{([^}]+)\}', surrounding)
                     
-                    b64_str = LatexParser._load_image_b64(base_dir, img_path)
+                    caption = cap_m.group(1).strip() if cap_m else ""
+                    label = lbl_m.group(1).strip() if lbl_m else None
+                    
+                    found_p, b64_str = LatexParser._load_image_b64(base_dir, img_path)
                     
                     fig_id = f"fig_{len(section_obj.blocks)+1}"
                     section_obj.blocks.append(Figure(
                         id=fig_id,
                         caption=caption,
                         label=label,
-                        image_filename=os.path.basename(img_path),
+                        image_filename=os.path.basename(found_p or img_path),
                         image_data_b64=b64_str,
                         original_path=img_path
                     ).model_dump())
@@ -279,33 +336,46 @@ class LatexParser:
                         label=lbl_m.group(1) if lbl_m else None
                     ).model_dump())
                     
-                # Clean text paragraphs
-                clean_p_text = re.sub(r'\\begin\{(?:figure|table|equation|align)[*]?\}.*?\\end\{(?:figure|table|equation|align)[*]?\}', '', text_block, flags=re.DOTALL)
+                # Clean text paragraphs: STRIP \label{...} BEFORE macro stripping to prevent label keys from leaking as body text!
+                clean_p_text = re.sub(r'\\begin\{(?:figure|table|equation|align|strip)[*]?\}.*?\\end\{(?:figure|table|equation|align|strip)[*]?\}', '', text_block, flags=re.DOTALL)
+                clean_p_text = re.sub(r'\\includegraphics(?:\[[^\]]*\])?\{[^}]+\}', '', clean_p_text)
+                clean_p_text = re.sub(r'\\caption(?:of\{figure\})?\{[^}]+\}', '', clean_p_text)
+                clean_p_text = re.sub(r'\\label\{[^}]+\}', '', clean_p_text) # STRIP LABELS PREVENTING LEAK
+                clean_p_text = re.sub(r'\\(?:ref|cite|pageref)\{[^}]+\}', '', clean_p_text)
                 clean_p_text = re.sub(r'\\[a-zA-Z]+\{([^}]+)\}', r'\1', clean_p_text)
                 clean_p_text = re.sub(r'\\[a-zA-Z]+', '', clean_p_text).strip()
                 
-                paras = [p.strip() for p in clean_p_text.split("\n\n") if len(p.strip()) > 10]
+                paras = [p.strip() for p in clean_p_text.split("\n\n") if len(p.strip()) > 15]
                 for p in paras:
-                    section_obj.blocks.append(Paragraph(text=p).model_dump())
+                    # Filter out stray label strings like "sec:introduction"
+                    if not re.match(r'^(?:sec|fig|tab|eq):[a-zA-Z0-9_-]+$', p.strip()):
+                        section_obj.blocks.append(Paragraph(text=p).model_dump())
                     
             sections.append(section_obj)
             
         return sections, warnings
 
     @staticmethod
-    def _load_image_b64(base_dir: str, rel_path: str) -> Optional[str]:
-        possible_paths = [
-            os.path.join(base_dir, rel_path),
-            os.path.join(base_dir, "figures", os.path.basename(rel_path)),
-            os.path.join(base_dir, "images", os.path.basename(rel_path)),
+    def _load_image_b64(base_dir: str, rel_path: str) -> Tuple[Optional[str], Optional[str]]:
+        rel_clean = rel_path.strip().replace('\\', '/')
+        fname = os.path.basename(rel_clean)
+        fname_no_ext = os.path.splitext(fname)[0]
+        
+        search_dirs = [
+            base_dir,
+            os.path.join(base_dir, 'figures'),
+            os.path.join(base_dir, 'images'),
+            os.path.dirname(os.path.join(base_dir, rel_clean))
         ]
-        for ext in ["", ".png", ".jpg", ".jpeg", ".pdf"]:
-            for p in possible_paths:
-                full_p = p + ext
-                if os.path.exists(full_p) and os.path.isfile(full_p):
+        
+        extensions = ['', '.png', '.PNG', '.jpg', '.JPG', '.jpeg', '.pdf', '.eps']
+        for d in search_dirs:
+            for ext in extensions:
+                target = os.path.join(d, fname_no_ext + ext) if ext else os.path.join(d, fname)
+                if os.path.exists(target) and os.path.isfile(target):
                     try:
-                        with open(full_p, "rb") as fh:
-                            return base64.b64encode(fh.read()).decode("utf-8")
+                        with open(target, 'rb') as fh:
+                            return target, base64.b64encode(fh.read()).decode('utf-8')
                     except Exception:
                         pass
-        return None
+        return None, None

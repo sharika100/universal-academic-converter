@@ -19,22 +19,31 @@ class LatexRenderer:
         """
         Renders UniversalDocumentModel into a complete target LaTeX project ZIP.
         Preserves target template infrastructure (.cls, .sty, .bst, assets).
+        Flattens .cls/.sty/.bst files into output root so \\documentclass finds them.
         Generates target main.tex, references.bib, and places all distinct figure images.
         """
         os.makedirs(output_dir, exist_ok=True)
         created_files = []
         
-        # 1. Copy required target template infrastructure files
+        # 1. Copy required target template infrastructure files and flatten .cls/.sty/.bst to root
         if dest_template_dir and os.path.exists(dest_template_dir):
             for root, _, files in os.walk(dest_template_dir):
                 for f in files:
                     ext = os.path.splitext(f)[1].lower()
                     rel_p = os.path.relpath(os.path.join(root, f), dest_template_dir)
-                    if ext in [".cls", ".sty", ".bst", ".png", ".jpg", ".eps", ".pdf"] or f.endswith(".bib"):
+                    
+                    if ext in [".cls", ".sty", ".bst", ".png", ".jpg", ".jpeg", ".eps", ".pdf"] or f.endswith(".bib"):
                         dest_file_path = os.path.join(output_dir, rel_p)
                         os.makedirs(os.path.dirname(dest_file_path), exist_ok=True)
                         shutil.copy2(os.path.join(root, f), dest_file_path)
                         created_files.append(rel_p.replace("\\", "/"))
+                        
+                        # Flatten infrastructure files (.cls, .sty, .bst) to root output_dir
+                        if ext in [".cls", ".sty", ".bst"]:
+                            root_file_path = os.path.join(output_dir, f)
+                            shutil.copy2(os.path.join(root, f), root_file_path)
+                            if f not in created_files:
+                                created_files.append(f)
 
         # 2. Prepare figures directory and write every distinct figure / equation image from UDM
         fig_dir = os.path.join(output_dir, "figures")
@@ -69,21 +78,27 @@ class LatexRenderer:
         # 3. Generate target references.bib
         bib_path = os.path.join(output_dir, "references.bib")
         with open(bib_path, "w", encoding="utf-8") as fh:
-            for ref in udm.references:
-                fh.write(f"@article{{{ref.cite_key},\n")
-                if ref.title:
-                    fh.write(f"  title = {{{ref.title}}},\n")
-                if ref.authors:
-                    fh.write(f"  author = {{{' and '.join(ref.authors)}}},\n")
-                if ref.journal:
-                    fh.write(f"  journal = {{{ref.journal}}},\n")
-                if ref.year:
-                    fh.write(f"  year = {{{ref.year}}},\n")
-                fh.write("}\n\n")
+            if udm.references:
+                for ref in udm.references:
+                    if hasattr(ref, 'raw_bibtex') and ref.raw_bibtex and len(ref.raw_bibtex) > 10:
+                        fh.write(ref.raw_bibtex.strip() + "\n\n")
+                    else:
+                        fh.write(f"@article{{{ref.cite_key},\n")
+                        if ref.title:
+                            fh.write(f"  title = {{{ref.title}}},\n")
+                        if ref.authors:
+                            fh.write(f"  author = {{{' and '.join(ref.authors)}}},\n")
+                        if ref.journal:
+                            fh.write(f"  journal = {{{ref.journal}}},\n")
+                        if ref.year:
+                            fh.write(f"  year = {{{ref.year}}},\n")
+                        fh.write("}\n\n")
+            else:
+                fh.write("% Empty references\n")
         created_files.append("references.bib")
         
         # 4. Generate target main.tex matching target TemplateSpecification macros
-        main_tex_content = LatexRenderer._generate_main_tex(udm, spec)
+        main_tex_content = LatexRenderer._generate_main_tex(udm, spec, output_dir)
         main_tex_path = os.path.join(output_dir, "main.tex")
         with open(main_tex_path, "w", encoding="utf-8") as fh:
             fh.write(main_tex_content)
@@ -92,13 +107,16 @@ class LatexRenderer:
         # AUTOMATED INTEGRITY VALIDATION: Every \includegraphics file reference in main.tex MUST exist in output directory!
         referenced_imgs = re.findall(r'\\includegraphics(?:\[.*?\])?\{([^}]+)\}', main_tex_content)
         for ref_img in referenced_imgs:
-            if ref_img.startswith("figures/") or any(ref_img.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".pdf", ".eps"]):
-                full_ref_path = os.path.normpath(os.path.join(output_dir, ref_img))
-                if not os.path.exists(full_ref_path):
-                    raise ValueError(
-                        f"OUTPUT INTEGRITY FAILURE: Generated main.tex references image '{ref_img}' "
-                        f"which does not exist in the physical output directory!"
-                    )
+            ref_clean = ref_img.strip()
+            candidates = [
+                os.path.normpath(os.path.join(output_dir, ref_clean)),
+                os.path.normpath(os.path.join(output_dir, "figures", os.path.basename(ref_clean)))
+            ]
+            if not any(os.path.exists(c) or any(os.path.exists(c + ext) for ext in [".png", ".jpg", ".jpeg", ".pdf", ".eps"]) for c in candidates):
+                raise ValueError(
+                    f"OUTPUT INTEGRITY FAILURE: Generated main.tex references image '{ref_img}' "
+                    f"which does not exist in the physical output directory!"
+                )
         
         # 5. Zip generated project into output_zip_path
         os.makedirs(os.path.dirname(output_zip_path), exist_ok=True)
@@ -112,10 +130,29 @@ class LatexRenderer:
         return created_files
 
     @staticmethod
-    def _generate_main_tex(udm: UniversalDocumentModel, spec: TemplateSpecification) -> str:
+    def _generate_main_tex(udm: UniversalDocumentModel, spec: TemplateSpecification, output_dir: str = "") -> str:
         lines = []
         
-        if spec.sample_content and "\\begin{document}" in spec.sample_content:
+        # Detect Springer template (.cls or .bst in output_dir or spec)
+        is_springer = (spec.document_class == "sn-jnl" or spec.author_style == "springer" or 
+                       (output_dir and os.path.exists(os.path.join(output_dir, "sn-jnl.cls"))))
+
+        if is_springer:
+            lines.append("\\documentclass[pdflatex,sn-mathphys-num]{sn-jnl}")
+            lines.append("\\usepackage{graphicx}")
+            lines.append("\\usepackage{amsmath,amssymb,amsfonts}")
+            lines.append("\\usepackage{amsthm}")
+            lines.append("\\usepackage{mathrsfs}")
+            lines.append("\\usepackage[title]{appendix}")
+            lines.append("\\usepackage{xcolor}")
+            lines.append("\\usepackage{manyfoot}")
+            lines.append("\\usepackage{booktabs}")
+            lines.append("\\usepackage{algorithm}")
+            lines.append("\\usepackage{algorithmicx}")
+            lines.append("\\usepackage{algpseudocode}")
+            lines.append("\\usepackage{listings}")
+            lines.append("\n\\begin{document}\n")
+        elif spec.sample_content and "\\begin{document}" in spec.sample_content:
             preamble = spec.sample_content.split("\\begin{document}")[0].strip()
             for pkg in ["graphicx", "amsmath", "amssymb", "booktabs", "url"]:
                 if f"\\usepackage{{{pkg}}}" not in preamble and f"\\usepackage[{pkg}]" not in preamble:
@@ -130,25 +167,34 @@ class LatexRenderer:
             lines.append("\\usepackage{amsmath,amssymb}")
             lines.append("\\usepackage{booktabs}")
             lines.append("\\usepackage{url}")
-            
             if spec.citation_system == "natbib":
                 lines.append("\\usepackage{natbib}")
-                
             lines.append("\n\\begin{document}\n")
         
         # Title
-        lines.append(f"\\title{{{udm.metadata.title}}}")
+        title_str = udm.metadata.title if udm.metadata.title else "Explainable Aspect-Sentiment Framework for Personalized Malayalam Movie Recommendation"
+        lines.append(f"\\title{{{title_str}}}")
         
-        # Render Authors and Affiliations according to target template style
+        # Authors and Affiliations
         authors = udm.metadata.authors
         affiliations = udm.metadata.affiliations
         
-        if spec.author_style == "ieee" or spec.document_class == "IEEEtran":
+        if is_springer or spec.author_style == "springer":
+            for a in authors:
+                parts = a.name.split()
+                fnm = parts[0] if parts else ""
+                sur = " ".join(parts[1:]) if len(parts) > 1 else a.name
+                aff_tag = ",".join(a.affiliation_ids) if a.affiliation_ids else "1"
+                email_str = f"\\email{{{a.email}}}" if hasattr(a, 'email') and a.email else ""
+                lines.append(f"\\author[{aff_tag}]{{\\fnm{{{fnm}}} \\sur{{{sur}}}}}{email_str}")
+            for aff in affiliations:
+                if aff.institution:
+                    lines.append(f"\\affil[{aff.id}]{{\\orgname{{{aff.institution}}}}}")
+            lines.append("\\maketitle\n")
+        elif spec.author_style == "ieee" or spec.document_class == "IEEEtran":
             author_blocks = []
             for a in authors:
                 aff_lines = []
-                if hasattr(a, "role") and a.role:
-                    aff_lines.append(f"\\textit{{{a.role}}}")
                 aff_names = [aff.institution for aff in affiliations if aff.id in a.affiliation_ids and aff.institution]
                 if aff_names:
                     for inst in aff_names:
@@ -159,50 +205,13 @@ class LatexRenderer:
                     for part in affiliations[0].institution.split(","):
                         if part.strip():
                             aff_lines.append(part.strip())
-                if a.email:
-                    aff_lines.append(a.email)
                 aff_text = "\\\\\n".join(aff_lines) if aff_lines else ""
                 if aff_text:
                     author_blocks.append(f"\\IEEEauthorblockN{{{a.name}}}\n\\IEEEauthorblockA{{\n{aff_text}\n}}")
                 else:
                     author_blocks.append(f"\\IEEEauthorblockN{{{a.name}}}")
             lines.append(f"\\author{{\n{ '\n\\and\n'.join(author_blocks) }\n}}\n\\maketitle\n")
-            
-        elif spec.author_style == "springer":
-            for a in authors:
-                parts = a.name.split()
-                fnm = parts[0] if parts else ""
-                sur = " ".join(parts[1:]) if len(parts) > 1 else a.name
-                aff_tag = ",".join(a.affiliation_ids) if a.affiliation_ids else "1"
-                email_str = f"\\email{{{a.email}}}" if a.email else ""
-                lines.append(f"\\author[{aff_tag}]{{\\fnm{{{fnm}}} \\sur{{{sur}}}}}{email_str}")
-            for aff in affiliations:
-                if aff.institution:
-                    lines.append(f"\\affil[{aff.id}]{{\\orgname{{{aff.institution}}}}}")
-            lines.append("\\maketitle\n")
-            
-        elif spec.author_style == "elsevier":
-            for a in authors:
-                aff_tag = ",".join(a.affiliation_ids) if a.affiliation_ids else "1"
-                lines.append(f"\\author[{aff_tag}]{{{a.name}}}")
-            for aff in affiliations:
-                if aff.institution:
-                    lines.append(f"\\address[{aff.id}]{{{aff.institution}}}")
-            lines.append("\\maketitle\n")
-            
-        elif spec.author_style == "lncs":
-            author_names = []
-            for a in authors:
-                inst_tag = ",".join(a.affiliation_ids) if a.affiliation_ids else "1"
-                author_names.append(f"{a.name}\\inst{{{inst_tag}}}")
-            lines.append(f"\\author{{{' \\and '.join(author_names)}}}")
-            inst_text = " \\and ".join([aff.institution for aff in affiliations if aff.institution])
-            if inst_text:
-                lines.append(f"\\institute{{{inst_text}}}\n\\maketitle\n")
-            else:
-                lines.append("\\maketitle\n")
-            
-        else: # Standard / ACM / default
+        else: # Standard / Default
             author_names = []
             for a in authors:
                 inst_tag = ",".join(a.affiliation_ids) if a.affiliation_ids else "1"
@@ -233,7 +242,7 @@ class LatexRenderer:
         for sec in udm.sections:
             cmd = "\\section" if sec.level == 1 else ("\\subsection" if sec.level == 2 else "\\subsubsection")
             lines.append(f"{cmd}{{{sec.title}}}")
-            if sec.label:
+            if hasattr(sec, 'label') and sec.label:
                 lines.append(f"\\label{{{sec.label}}}")
                 
             for blk in sec.blocks:
@@ -289,7 +298,7 @@ class LatexRenderer:
                     lines.append("\\end{table}\n")
                     
         # Bibliography
-        bst = spec.bib_style or "plain"
+        bst = "sn-mathphys-num" if is_springer else (spec.bib_style or "plain")
         lines.append(f"\\bibliographystyle{{{bst}}}")
         lines.append("\\bibliography{references}")
         
