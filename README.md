@@ -154,11 +154,7 @@ universal-academic-converter/
 
 ---
 
-## ⚖️ License
 
-MIT License. Designed for academic research and publication workflows.
-
----
 
 ## Developer
 
