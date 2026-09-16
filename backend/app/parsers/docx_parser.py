@@ -10,11 +10,13 @@ from docx.oxml.text.paragraph import CT_P
 from docx.oxml.table import CT_Tbl
 from docx.table import Table as DocxTable
 from docx.text.paragraph import Paragraph as DocxParagraph
+from docx.oxml.ns import qn
 from PIL import Image
 
 from app.models.udm import (
     UniversalDocumentModel, Metadata, Author, Affiliation,
-    Section, Paragraph, ListBlock, ListItem, Equation, Figure, Table, Reference
+    Section, Paragraph, ListBlock, ListItem, Equation, Figure, Table, TableCell,
+    Reference, LabelValue, FieldItem, SignatureBlock, Annexure
 )
 
 class DocxParser:
@@ -28,10 +30,13 @@ class DocxParser:
         udm = UniversalDocumentModel(source_format="DOCX")
         warnings = []
         
-        # 1. Extract Images from document package with image metadata (dimensions & aspect ratio)
-        rel_image_map = DocxParser._extract_images(doc)
+        # 0. Document Type Classification
+        doc_type = DocxParser.detect_document_type(doc)
+        udm.doc_type = doc_type
+        udm.metadata.doc_type = doc_type
         
-        # Global state for document traversal
+        # 1. Extract Images from document package
+        rel_image_map = DocxParser._extract_images(doc)
         occurrence_counter = 0
         
         body_elements = list(doc.element.body)
@@ -46,10 +51,9 @@ class DocxParser:
                 style_name = p.style.name.lower() if p.style else ""
                 if not text:
                     continue
-                if title_idx == -1 and ("title" in style_name or (len(text) > 5 and len(text) < 180 and idx < 5)):
+                if title_idx == -1 and ("title" in style_name or (len(text) > 3 and len(text) < 180 and idx < 5)):
                     title_idx = idx
                 
-                # Strict section heading detection for first body heading
                 is_explicit_heading = (
                     "heading 1" in style_name
                     or text.lower().startswith("abstract")
@@ -58,13 +62,13 @@ class DocxParser:
                 if is_explicit_heading and idx > 0:
                     first_heading_idx = min(first_heading_idx, idx)
                     
-        # Parse Title & Author/Affiliation block from top section up to first_heading_idx
+        # Parse Title & Author/Affiliation block
         header_lines = []
         if title_idx != -1:
             title_p = DocxParagraph(body_elements[title_idx], doc)
             udm.metadata.title = title_p.text.strip()
+            udm.metadata.document_title = title_p.text.strip()
             
-            # Dynamic header boundary scanning up to first_heading_idx
             header_end = first_heading_idx
             for idx in range(title_idx + 1, header_end):
                 elem = body_elements[idx]
@@ -82,15 +86,20 @@ class DocxParser:
             
         consumed_header_texts = set()
         for d in header_lines:
-            txt = d.get("full_text", "").strip()
+            txt = (d.get("full_text", "") if isinstance(d, dict) else str(d)).strip()
             if txt:
                 consumed_header_texts.add(txt.lower())
 
-        # 2. Iterate elements sequentially (Paragraphs, Tables, Drawings, Images)
+        # 2. Extract Generic Label-Values & Fields across document
+        label_values = DocxParser._extract_label_values(doc)
+        udm.metadata.label_values = label_values
+        for lv in label_values:
+            udm.metadata.fields[lv.label] = lv.value
+
+        # 3. Iterate body elements sequentially
         sections = []
-        current_section = Section(title="Introduction", level=1, blocks=[])
+        current_section = Section(title="Main Content", level=1, blocks=[])
         
-        title_found = False
         abstract_found = False
         references_found = False
         first_heading_found = False
@@ -102,7 +111,6 @@ class DocxParser:
             text = p.text.strip()
             style_name = p.style.name.lower() if p.style else ""
             
-            # Extract image relationship IDs from paragraph XML
             para_rids = DocxParser._get_paragraph_image_rids(p, rel_image_map)
             is_caption = bool(re.match(r'^(fig|figure|chart|diagram)\b', text, re.I)) or "caption" in style_name
             
@@ -135,7 +143,6 @@ class DocxParser:
                     h = img_info.get("height", -1)
                     ar = img_info.get("aspect_ratio", 0)
                     
-                    # Classification: Small height formula screenshots vs figures
                     is_equation_image = (ar > 2.5 and 0 < h < 120) or ("w:math" in p._element.xml or "m:oMath" in p._element.xml)
                     
                     if is_equation_image:
@@ -155,7 +162,7 @@ class DocxParser:
                             media_path=img_info.get("media_path"),
                             content_type=f"image/{ext.lstrip('.')}",
                             sha256=img_info.get("sha256"),
-                            caption=caption_text, # Keep exact source caption, do NOT invent "Figure N"
+                            caption=caption_text,
                             image_filename=fname,
                             image_data_b64=img_info["b64"],
                             position_index=occurrence_counter
@@ -174,8 +181,7 @@ class DocxParser:
                     pending_caption = text
                 return
                 
-            # Prevent header metadata and author emails from leaking into body text
-            if elem_idx < first_heading_idx:
+            if doc_type == "Research Paper" and elem_idx < first_heading_idx:
                 text_lower = text.lower()
                 email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', text)
                 if email_match or text_lower in consumed_header_texts:
@@ -184,10 +190,7 @@ class DocxParser:
                     return
                 if udm.metadata.authors and any(a.name.lower() in text_lower for a in udm.metadata.authors):
                     return
-                if udm.metadata.affiliations and any(aff.institution.lower() in text_lower for aff in udm.metadata.affiliations if aff.institution):
-                    return
                     
-            # Check for Abstract
             if text.lower().startswith("abstract") or "abstract" in style_name:
                 clean_abs = re.sub(r'^(abstract[:\.\s-]*)', '', text, flags=re.I).strip()
                 if clean_abs:
@@ -199,17 +202,15 @@ class DocxParser:
                 abstract_found = False
                 return
                 
-            # Check for Keywords
             if text.lower().startswith("keyword") or text.lower().startswith("index terms"):
                 kw_str = re.sub(r'^(keywords?|index terms)[\s:;\.\-—–]*', '', text, flags=re.I).strip()
                 udm.metadata.keywords = [k.strip() for k in re.split(r'[,;]', kw_str) if k.strip()]
                 return
 
-            # Table paragraphs / table captions must not create section headings
             if is_inside_table or text.lower().startswith("table"):
                 return
                 
-            # Check for Headings with Strict Hierarchy (Level 1 vs Level 2 vs Level 3)
+            # Headings Detection
             is_heading = False
             heading_level = 1
             clean_title = text
@@ -230,14 +231,14 @@ class DocxParser:
                 is_heading = True
                 heading_level = 1
                 clean_title = m_lvl1.group(1).strip()
-            elif "heading 1" in style_name:
+            elif "heading 1" in style_name or text.endswith(":") and len(text) < 60:
                 is_heading = True
                 heading_level = 1
-                clean_title = re.sub(r'^\d+[\.\s]+', '', text).strip()
+                clean_title = text.rstrip(":").strip()
             elif "heading 2" in style_name:
                 is_heading = True
                 heading_level = 2
-                clean_title = re.sub(r'^[A-Z]\.[\s]*', '', text).strip()
+                clean_title = text
             elif "heading 3" in style_name:
                 is_heading = True
                 heading_level = 3
@@ -258,7 +259,6 @@ class DocxParser:
                 current_section = Section(title=clean_title, level=heading_level, blocks=[])
                 return
                 
-            # References
             if references_found:
                 ref_id = f"ref_{len(udm.references)+1}"
                 udm.references.append(Reference(
@@ -269,7 +269,6 @@ class DocxParser:
                 ))
                 return
                 
-            # List Bullet
             if "bullet" in style_name or "list" in style_name or text.startswith("•") or text.startswith("-"):
                 clean_item = text.lstrip("•- ").strip()
                 if current_section.blocks and isinstance(current_section.blocks[-1], dict) and current_section.blocks[-1].get("type") == "list":
@@ -284,7 +283,6 @@ class DocxParser:
                     ).model_dump())
                 return
                 
-            # Equation
             if "w:math" in p._element.xml or "m:oMath" in p._element.xml or (text.startswith("$$") and text.endswith("$$")):
                 math_tex = re.sub(r'^\$\$|\$\$$', '', text).strip()
                 current_section.blocks.append(Equation(
@@ -306,56 +304,129 @@ class DocxParser:
                 t = DocxTable(elem, doc)
                 headers = []
                 rows = []
+                cell_matrix = []
+                colspan_mat = []
+                rowspan_mat = []
+                
+                is_signature_table = False
+                
                 for r_idx, row in enumerate(t.rows):
-                    row_cells = []
+                    row_cells_txt = []
+                    row_cells_obj = []
+                    row_cols = []
+                    row_rows = []
+                    
                     for cell in row.cells:
+                        txt = cell.text.strip()
+                        row_cells_txt.append(txt)
+                        
+                        if any(k in txt.lower() for k in ["signature", "hod", "course instructor", "stream coordinator"]):
+                            is_signature_table = True
+                            
                         for cell_p in cell.paragraphs:
                             process_paragraph_element(cell_p, idx, is_inside_table=True)
-                        row_cells.append(cell.text.strip())
-                    if r_idx == 0:
-                        headers = row_cells
-                    else:
-                        rows.append(row_cells)
+                            
+                        tcPr = cell._tc.get_or_add_tcPr()
+                        gridSpan = tcPr.find(qn('w:gridSpan'))
+                        vMerge = tcPr.find(qn('w:vMerge'))
                         
+                        cs = int(gridSpan.get(qn('w:val'))) if gridSpan is not None and gridSpan.get(qn('w:val')) else 1
+                        rs = 1
+                        if vMerge is not None:
+                            val = vMerge.get(qn('w:val'))
+                            if val != 'restart':
+                                rs = 0
+                                
+                        row_cols.append(cs)
+                        row_rows.append(rs)
+                        row_cells_obj.append(TableCell(
+                            content=txt,
+                            colspan=cs,
+                            rowspan=rs,
+                            is_header=(r_idx == 0)
+                        ))
+                        
+                    if r_idx == 0:
+                        headers = row_cells_txt
+                    else:
+                        rows.append(row_cells_txt)
+                        
+                    cell_matrix.append(row_cells_obj)
+                    colspan_mat.append(row_cols)
+                    rowspan_mat.append(row_rows)
+                    
+                if is_signature_table:
+                    udm.signatures.append(SignatureBlock(
+                        title="Signatures",
+                        name=" , ".join(headers) if headers else "Signature Block"
+                    ))
+                    
                 tbl_obj = Table(
                     id=f"tbl_{len(current_section.blocks)+1}",
                     headers=headers,
                     rows=rows,
+                    cells=cell_matrix,
+                    colspan_matrix=colspan_mat,
+                    rowspan_matrix=rowspan_mat,
                     caption=f"Table {len(current_section.blocks)+1}"
                 )
                 current_section.blocks.append(tbl_obj.model_dump())
+                
         if current_section.blocks:
             sections.append(current_section)
             
         udm.sections = sections if sections else [Section(title="Main Content", level=1, blocks=[Paragraph(text="Content extracted").model_dump()])]
         
-        # Strict boundary type validation before returning UDM
-        if not isinstance(udm.metadata.authors, list):
-            raise TypeError(f"UDM Boundary Validation Failed: metadata.authors must be list, got {type(udm.metadata.authors).__name__}")
-        for idx, a in enumerate(udm.metadata.authors):
-            if not isinstance(a, Author):
-                raise TypeError(f"UDM Boundary Validation Failed: metadata.authors[{idx}] must be Author, got {type(a).__name__}")
-                
-        if not isinstance(udm.sections, list):
-            raise TypeError(f"UDM Boundary Validation Failed: sections must be list, got {type(udm.sections).__name__}")
-        for s_idx, sec in enumerate(udm.sections):
-            if not isinstance(sec, Section):
-                raise TypeError(f"UDM Boundary Validation Failed: sections[{s_idx}] must be Section, got {type(sec).__name__}")
-            if not isinstance(sec.blocks, list):
-                raise TypeError(f"UDM Boundary Validation Failed: sections[{s_idx}].blocks must be list, got {type(sec.blocks).__name__}")
-            for b_idx, blk in enumerate(sec.blocks):
-                if not isinstance(blk, dict):
-                    raise TypeError(f"UDM Boundary Validation Failed: sections[{s_idx}].blocks[{b_idx}] must be dict, got {type(blk).__name__}")
-                if "type" not in blk:
-                    raise ValueError(f"UDM Boundary Validation Failed: sections[{s_idx}].blocks[{b_idx}] missing required 'type' field")
-            
-        if not udm.metadata.authors:
-            warnings.append("Header author metadata was not deterministically structured; preserving original header text.")
-        if not udm.metadata.affiliations:
-            warnings.append("Header affiliation metadata was not deterministically structured.")
-            
-        udm.warnings = warnings
         return udm
+
+    @staticmethod
+    def detect_document_type(doc: DocxDocument) -> str:
+        """Classifies document type dynamically based on structural & textual signals."""
+        full_text = " ".join([p.text for p in doc.paragraphs[:40]]).lower()
+        
+        if any(kw in full_text for kw in ["course delivery manual", "cdm", "syllabus", "course outcome", "co-po", "learning assessment", "stream coordinator"]):
+            return "Course Document"
+        elif any(kw in full_text for kw in ["requisition form", "application form", "approval form", "signature of applicant"]):
+            return "Institutional Form"
+        elif any(kw in full_text for kw in ["annual report", "project report", "progress report", "fdp report"]):
+            return "Report"
+        else:
+            return "Research Paper"
+
+    @staticmethod
+    def _extract_label_values(doc: DocxDocument) -> List[LabelValue]:
+        label_vals = []
+        
+        for p in doc.paragraphs:
+            txt = p.text.strip()
+            if not txt:
+                continue
+            m = re.match(r'^([A-Za-z0-9\s,\-\(\)\&\/]{3,50})\s*[:=]\s*(.+)$', txt)
+            if m:
+                lbl = m.group(1).strip()
+                val = m.group(2).strip()
+                if lbl and val and len(lbl) < 55:
+                    label_vals.append(LabelValue(label=lbl, value=val, confidence=0.95, source_location="paragraph"))
+                    
+        for tbl in doc.tables:
+            for row in tbl.rows:
+                cells = [c.text.strip() for c in row.cells]
+                if len(cells) == 2 and cells[0] and cells[1]:
+                    lbl = cells[0].strip().rstrip(":")
+                    val = cells[1].strip().lstrip(":")
+                    if lbl and val:
+                        label_vals.append(LabelValue(label=lbl, value=val, confidence=0.98, source_location="table"))
+                elif len(cells) == 4 and cells[0] and cells[1] and cells[2] and cells[3]:
+                    lbl1 = cells[0].strip().rstrip(":")
+                    val1 = cells[1].strip().lstrip(":")
+                    lbl2 = cells[2].strip().rstrip(":")
+                    val2 = cells[3].strip().lstrip(":")
+                    if lbl1 and val1:
+                        label_vals.append(LabelValue(label=lbl1, value=val1, confidence=0.95, source_location="table"))
+                    if lbl2 and val2:
+                        label_vals.append(LabelValue(label=lbl2, value=val2, confidence=0.95, source_location="table"))
+                        
+        return label_vals
 
     @staticmethod
     def _extract_images(doc: DocxDocument) -> Dict[str, Dict[str, Any]]:
@@ -399,176 +470,94 @@ class DocxParser:
         xml_str = p._element.xml
         if any(kw in xml_str for kw in ["drawing", "imagedata", "blip", "object", "shape"]):
             for rId in rel_image_map.keys():
-                if rId in xml_str:
+                if f'r:embed="{rId}"' in xml_str or f'r:id="{rId}"' in xml_str:
                     found_rids.append(rId)
         return found_rids
 
     @staticmethod
     def _parse_paragraph_runs(p: DocxParagraph) -> Dict[str, Any]:
-        runs_info = []
-        full_text = []
+        runs_data = []
+        full_text = ""
         for run in p.runs:
             txt = run.text
-            full_text.append(txt)
-            is_super = False
-            if run._r.rPr is not None and run._r.rPr.vertAlign is not None:
-                val = run._r.rPr.vertAlign.val
-                if val in ["superscript", "super"]:
-                    is_super = True
-            runs_info.append({"text": txt, "is_super": is_super})
-        return {"full_text": "".join(full_text).strip(), "runs": runs_info}
+            full_text += txt
+            runs_data.append({
+                "text": txt,
+                "bold": bool(run.bold),
+                "italic": bool(run.italic),
+                "font_size": run.font.size.pt if run.font and run.font.size else None
+            })
+        return {"full_text": full_text, "runs": runs_data}
 
     @staticmethod
-    def _parse_author_header(header_data: List[Any]) -> Tuple[List[Author], List[Affiliation], str]:
-        authors: List[Author] = []
-        affiliations: List[Affiliation] = []
+    def _parse_author_header(header_lines: List[Any]) -> Tuple[List[Author], List[Affiliation], str]:
+        authors = []
+        affiliations = []
+        header_raw_list = []
         
-        normalized_entries: List[Dict[str, Any]] = []
-        raw_lines: List[str] = []
-        
-        for item in header_data:
-            if isinstance(item, str):
-                txt = item.strip()
-                if txt:
-                    normalized_entries.append({"full_text": txt, "runs": [{"text": txt, "is_super": False}]})
-                    raw_lines.append(txt)
-            elif isinstance(item, dict):
-                txt = str(item.get("full_text", "")).strip()
-                runs = item.get("runs", [])
-                if txt:
-                    normalized_entries.append({"full_text": txt, "runs": runs if isinstance(runs, list) else []})
-                    raw_lines.append(txt)
-            elif hasattr(item, "text"):
-                txt = str(getattr(item, "text", "")).strip()
-                if txt:
-                    normalized_entries.append({"full_text": txt, "runs": [{"text": txt, "is_super": False}]})
-                    raw_lines.append(txt)
+        email_map = {}
+        for line_d in header_lines:
+            txt = (line_d.get("full_text", "") if isinstance(line_d, dict) else str(line_d)).strip()
+            header_raw_list.append(txt)
+            found_emails = re.findall(r'[\w\.-]+@[\w\.-]+\.\w+', txt)
+            if found_emails:
+                for em in found_emails:
+                    user_part = em.split("@")[0].lower()
+                    email_map[user_part] = em
                     
-        raw_header_str = "\n".join(raw_lines)
-        
-        role_kw = ["research scholar", "professor", "associate professor", "assistant professor", "lecturer", "scholar", "student", "engineer", "researcher", "scientist", "member, ieee", "senior member", "fellow, ieee", "head", "dean", "director", "chair"]
-        inst_kw = ["department", "university", "institute", "college", "school", "laboratory", "center", "centre", "dept", "inc", "ltd", "corp", "technology", "sciences", "engineering"]
-        loc_patterns = [r'\bcoimbatore\b', r'\bchennai\b', r'\bbangalore\b', r'\bmumbai\b', r'\bdelhi\b', r'\btamil nadu\b', r'\bkerala\b', r'\bindia\b', r'\busa\b', r'\buk\b', r'\bcalifornia\b', r'\bca\b', r'\bma\b', r'\bny\b']
-        ignore_prefix = ("abstract", "keyword", "intro", "table", "fig", "reference", "index terms", "\\begin", "\\end", "\\sep")
-        prose_kw = ["recommendation", "framework", "evaluation", "precision", "recall", "analysis", "dataset", "approach", "methodology", "sentiment", "performance", "experiment", "result", "study", "paper"]
-        
-        def classify_line(s: str) -> str:
-            sl = s.lower().strip()
-            if not sl or sl.startswith(ignore_prefix) or len(sl) > 200:
-                return "ignore"
-            if any(w in sl for w in prose_kw):
-                return "ignore"
-            if "@" in s or sl.startswith("email"):
-                return "email"
-            if sl.startswith(('dr.', 'prof.', 'mr.', 'ms.', 'mrs.')):
-                return "name_candidate"
-            if any(r in sl for r in role_kw):
-                return "role"
-            if any(ik in sl for ik in inst_kw):
-                return "institution"
-            if any(re.search(pat, sl) for pat in loc_patterns):
-                return "location"
-            return "name_candidate"
-
-        current_author: Optional[Author] = None
-        current_affil_lines: List[str] = []
-        affil_map: Dict[str, Affiliation] = {}
-        
-        for d in normalized_entries:
-            line_str = d["full_text"]
-            l_type = classify_line(line_str)
-            
-            if l_type == "ignore":
+        for line_d in header_lines:
+            txt = (line_d.get("full_text", "") if isinstance(line_d, dict) else str(line_d)).strip()
+            if not txt:
                 continue
                 
-            if l_type == "email":
-                email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', line_str)
-                email_val = email_match.group(0) if email_match else line_str
-                if current_author:
-                    current_author.email = email_val
-                elif authors:
-                    authors[-1].email = email_val
-                continue
-                
-            if l_type == "role":
-                if current_author:
-                    current_author.role = line_str
-                elif authors:
-                    authors[-1].role = line_str
-                continue
-                
-            if l_type in ["institution", "location"]:
-                current_affil_lines.append(line_str)
-                if current_author and current_author.affiliation_ids:
-                    aff_id = current_author.affiliation_ids[0]
-                    if aff_id in affil_map:
-                        existing = affil_map[aff_id].institution
-                        if line_str not in existing:
-                            affil_map[aff_id].institution = f"{existing}, {line_str}" if existing else line_str
-                continue
-                
-            # Process Author Name line or Multiple Author Names
-            runs = d.get("runs", [])
-            superscripts = [r.get("text", "").strip() for r in runs if isinstance(r, dict) and r.get("is_super") and r.get("text")]
-            
-            line_str_clean = re.sub(r'(\d)\s*,\s*(\d)', r'\1;\2', line_str)
-            tokens = [t.strip() for t in re.split(r',|\band\b|&', line_str_clean) if t.strip()]
-            
-            for token in tokens:
-                token_norm = token.replace(";", ",")
-                m = re.match(r'^(.*?)(?:[\$\^\#\[\(]?([\d\*\,\s]+)[\$\^\#\]\)]?)?$', token_norm)
-                if m:
-                    name_part = m.group(1).strip()
-                    tag_part = m.group(2) if m.group(2) else ""
-                    
-                    if not name_part or len(name_part) < 2 or classify_line(name_part) not in ["name_candidate", "name_or_text"]:
-                        continue
-                        
-                    aff_ids = [t.strip() for t in re.findall(r'\d+', tag_part)]
-                    if not aff_ids and superscripts:
-                        aff_ids = [s for s in superscripts if s.isdigit()]
-                        
-                    is_corr = "*" in tag_part or "corresponding" in token.lower()
-                    
-                    aff_id = aff_ids[0] if aff_ids else str(len(affiliations) + 1)
-                    if not aff_ids:
-                        aff_ids = [aff_id]
-                        
-                    if aff_id not in affil_map:
-                        inst_text = ", ".join(current_affil_lines) if current_affil_lines else ""
-                        aff_obj = Affiliation(id=aff_id, institution=inst_text, raw_text=line_str)
-                        affiliations.append(aff_obj)
-                        affil_map[aff_id] = aff_obj
-                        current_affil_lines = []
-                        
-                    parts = name_part.split()
-                    g_name = parts[0] if parts else ""
-                    s_name = " ".join(parts[1:]) if len(parts) > 1 else ""
-                    
-                    email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', token)
-                    email = email_match.group(0) if email_match else None
-                    
-                    orcid_match = re.search(r'\d{4}-\d{4}-\d{4}-[\dxX]{4}', token)
-                    orcid = orcid_match.group(0) if orcid_match else None
-                    
-                    author_obj = Author(
-                        name=name_part,
-                        given_name=g_name,
-                        surname=s_name,
-                        email=email,
-                        affiliation_ids=aff_ids,
-                        corresponding=is_corr,
-                        orcid=orcid
-                    )
-                    authors.append(author_obj)
-                    current_author = author_obj
-                    
-        if current_affil_lines and affiliations:
-            extra_text = ", ".join(current_affil_lines)
-            if extra_text not in affiliations[-1].institution:
-                if affiliations[-1].institution:
-                    affiliations[-1].institution += f", {extra_text}"
+            if any(kw in txt.lower() for kw in ["university", "institute", "college", "department", "school", "coimbatore", "tamil nadu"]):
+                aff_id = f"aff{len(affiliations)+1}"
+                m_num = re.match(r'^([\d\*†‡§]+)\s*(.+)$', txt)
+                if m_num:
+                    aff_id = m_num.group(1).strip()
+                    inst_text = m_num.group(2).strip()
                 else:
-                    affiliations[-1].institution = extra_text
+                    inst_text = txt
+                affiliations.append(Affiliation(
+                    id=aff_id,
+                    institution=inst_text,
+                    raw_text=txt
+                ))
+                continue
                 
-        return authors, affiliations, raw_header_str
+            if txt.lower().startswith("abstract") or txt.lower().startswith("keywords"):
+                continue
+
+            candidate_names = [txt]
+            if "," in txt and not any(kw in txt.lower() for kw in ["abstract", "keywords", "email", "scholar", "professor", "coimbatore", "tamil nadu", "department", "university"]):
+                candidate_names = [c.strip() for c in re.split(r',\s*(?=[A-Z])', txt) if c.strip()]
+
+            for cand in candidate_names:
+                clean_name = cand.strip()
+                m_aff = re.search(r'([\d\*†‡§\s,]+)$', clean_name)
+                aff_ids = []
+                if m_aff:
+                    aff_ids = [a.strip() for a in re.split(r'[,;\s]', m_aff.group(1)) if a.strip()]
+                    clean_name = clean_name[:m_aff.start()].strip()
+                    
+                parts = clean_name.split()
+                is_plausible_name = (
+                    1 <= len(parts) <= 4
+                    and not any(kw in clean_name.lower() for kw in ["department", "university", "institute", "college", "school", "abstract", "keywords", "email", "@", "scholar", "professor", "coimbatore", "tamil nadu", "ndcg", "precision", "recall", "f1", "accuracy", "begin", "end"])
+                    and not re.search(r'[\d\\\{\}\[\]]', clean_name)
+                )
+                
+                if is_plausible_name:
+                    matched_email = None
+                    for u_part, em in email_map.items():
+                        if u_part in clean_name.lower() or any(p.lower() in u_part for p in parts if len(p) > 2):
+                            matched_email = em
+                            break
+                            
+                    authors.append(Author(
+                        name=clean_name,
+                        email=matched_email,
+                        affiliation_ids=aff_ids or ["aff1"]
+                    ))
+                
+        return authors, affiliations, "\n".join(header_raw_list)

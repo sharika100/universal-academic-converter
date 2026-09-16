@@ -1,7 +1,9 @@
 import os
+import re
 import base64
 import tempfile
 import docx
+from typing import Optional, List, Dict, Any
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import parse_xml, OxmlElement
@@ -12,13 +14,127 @@ from app.models.template_spec import TemplateSpecification
 
 class DocxRenderer:
     @staticmethod
-    def render(udm: UniversalDocumentModel, spec: TemplateSpecification, output_docx_path: str):
-        """Renders UniversalDocumentModel into a target DOCX file."""
+    def render(udm: UniversalDocumentModel, spec: TemplateSpecification, output_docx_path: str, template_path: Optional[str] = None):
+        """
+        Renders UniversalDocumentModel into a target DOCX file.
+        If a valid target template_path is provided, populates the destination template in-place,
+        preserving all template headers, footers, logos, margins, fonts, table styles, borders, and section breaks.
+        """
+        if template_path and os.path.exists(template_path) and template_path.endswith(".docx"):
+            DocxRenderer._render_inplace_template(udm, spec, output_docx_path, template_path)
+        else:
+            DocxRenderer._render_generic_document(udm, spec, output_docx_path)
+
+    @staticmethod
+    def _render_inplace_template(udm: UniversalDocumentModel, spec: TemplateSpecification, output_docx_path: str, template_path: str):
+        doc = docx.Document(template_path)
+        
+        # 1. In-Place Label-Value & Field Population
+        mapped_labels = set()
+        for tbl in doc.tables:
+            for r_idx, row in enumerate(tbl.rows):
+                cell_txts = [c.text.strip() for c in row.cells]
+                if len(cell_txts) >= 2:
+                    tgt_lbl = cell_txts[0].strip().rstrip(":")
+                    for lv in udm.metadata.label_values:
+                        lbl_clean = re.sub(r'[^a-zA-Z0-9]', '', lv.label).lower()
+                        tgt_clean = re.sub(r'[^a-zA-Z0-9]', '', tgt_lbl).lower()
+                        if lbl_clean and tgt_clean and (lbl_clean in tgt_clean or tgt_clean in lbl_clean):
+                            if len(row.cells) > 1:
+                                row.cells[1].text = f": {lv.value}"
+                                mapped_labels.add(lv.label)
+                                break
+                                
+        # Paragraph Label-Values
+        for p in doc.paragraphs:
+            txt = p.text.strip()
+            if not txt:
+                continue
+            for lv in udm.metadata.label_values:
+                lbl_clean = re.sub(r'[^a-zA-Z0-9]', '', lv.label).lower()
+                p_clean = re.sub(r'[^a-zA-Z0-9]', '', txt).lower()
+                if lbl_clean and p_clean and lbl_clean in p_clean and len(lbl_clean) > 4:
+                    if ":" in txt:
+                        prefix = txt.split(":")[0]
+                        p.text = f"{prefix}: {lv.value}"
+                        mapped_labels.add(lv.label)
+                        break
+
+        # 2. Table Data Row Population & Expansion
+        source_tables = []
+        for sec in udm.sections:
+            for blk in sec.blocks:
+                if isinstance(blk, dict) and blk.get("type") == "table":
+                    source_tables.append(blk)
+
+        for s_tbl in source_tables:
+            s_headers = s_tbl.get("headers", [])
+            s_rows = s_tbl.get("rows", [])
+            s_cols = len(s_headers) if s_headers else (len(s_rows[0]) if s_rows else 0)
+            
+            # Find best target table match
+            best_target_tbl = None
+            best_score = 0
+            
+            for t_idx, tpl_t in enumerate(doc.tables):
+                t_cols = len(tpl_t.columns) if tpl_t.rows else 0
+                if t_cols == s_cols and t_cols > 1:
+                    # Check header match
+                    t_hdr_txt = [c.text.strip() for c in tpl_t.rows[0].cells]
+                    overlap = sum(1 for h in s_headers if any(h.lower() in th.lower() for th in t_hdr_txt))
+                    score = overlap * 10 + (10 if t_cols == s_cols else 0)
+                    if score > best_score:
+                        best_score = score
+                        best_target_tbl = tpl_t
+                        
+            if best_target_tbl and s_rows:
+                # Populate existing rows starting after header
+                start_r = 1 if len(best_target_tbl.rows) > 1 else 0
+                for s_r_idx, s_row_cells in enumerate(s_rows):
+                    target_r_idx = start_r + s_r_idx
+                    if target_r_idx < len(best_target_tbl.rows):
+                        r_cells = best_target_tbl.rows[target_r_idx].cells
+                        for c_idx, val in enumerate(s_row_cells):
+                            if c_idx < len(r_cells):
+                                r_cells[c_idx].text = str(val)
+                    else:
+                        # Append new row copying styling
+                        new_tr = parse_xml(best_target_tbl.rows[-1]._tr.xml)
+                        best_target_tbl._tbl.append(new_tr)
+                        new_row_cells = best_target_tbl.rows[-1].cells
+                        for c_idx, val in enumerate(s_row_cells):
+                            if c_idx < len(new_row_cells):
+                                new_row_cells[c_idx].text = str(val)
+
+        # 3. Unmapped Content Section
+        if hasattr(udm, "unmapped_elements") and udm.unmapped_elements:
+            unmapped_lvs = [u for u in udm.unmapped_elements if u.get("element_type") == "label_value"]
+            if unmapped_lvs:
+                doc.add_page_break()
+                p_u_h = doc.add_paragraph()
+                r_u_h = p_u_h.add_run("Unmapped Source Information (Annexure)")
+                r_u_h.font.bold = True
+                r_u_h.font.size = Pt(12)
+                p_u_h.paragraph_format.space_after = Pt(6)
+                
+                t_u = doc.add_table(rows=1, cols=2)
+                t_u.style = 'Table Grid'
+                t_u.rows[0].cells[0].text = "Field Label"
+                t_u.rows[0].cells[1].text = "Source Content"
+                
+                for u_item in unmapped_lvs:
+                    r_c = t_u.add_row().cells
+                    r_c[0].text = str(u_item.get("label", ""))
+                    r_c[1].text = str(u_item.get("value", ""))
+                    
+        doc.save(output_docx_path)
+
+    @staticmethod
+    def _render_generic_document(udm: UniversalDocumentModel, spec: TemplateSpecification, output_docx_path: str):
         doc = docx.Document()
         
         # Configure default page margins
-        sections = doc.sections
-        for section in sections:
+        for section in doc.sections:
             section.top_margin = Inches(1.0)
             section.bottom_margin = Inches(1.0)
             section.left_margin = Inches(1.0)
@@ -115,7 +231,7 @@ class DocxRenderer:
                     b64_data = blk.get("image_data_b64")
                     if b64_data:
                         try:
-                            img_bytes = base64.b64decode(b64_data)
+                            img_bytes = base64.b64encode(b64_data)
                             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_img:
                                 tmp_img.write(img_bytes)
                                 tmp_img_path = tmp_img.name

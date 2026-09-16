@@ -19,12 +19,50 @@ class Affiliation(BaseModel):
     country: Optional[str] = None
     raw_text: Optional[str] = None
 
+class LabelValue(BaseModel):
+    type: str = "label_value"
+    label: str
+    value: str
+    confidence: float = 1.0
+    source_location: str = ""
+
+class FieldItem(BaseModel):
+    type: str = "field"
+    field_name: str
+    value: str
+    placeholder: Optional[str] = None
+
+class SignatureBlock(BaseModel):
+    type: str = "signature_block"
+    title: str
+    name: Optional[str] = None
+    signature: Optional[str] = None
+    date: Optional[str] = None
+
+class Annexure(BaseModel):
+    type: str = "annexure"
+    title: str
+    content_blocks: List[Dict[str, Any]] = Field(default_factory=list)
+
+class HeaderFooterBlock(BaseModel):
+    type: str = "header_footer"
+    is_header: bool = True
+    text: str = ""
+
+class PageBreak(BaseModel):
+    type: str = "page_break"
+
 class Metadata(BaseModel):
     title: str = "Untitled Document"
+    doc_type: str = "General Document"
+    document_title: Optional[str] = None
+    institution: Optional[str] = None
     authors: List[Author] = Field(default_factory=list)
     affiliations: List[Affiliation] = Field(default_factory=list)
     abstract: str = ""
     keywords: List[str] = Field(default_factory=list)
+    fields: Dict[str, str] = Field(default_factory=dict)
+    label_values: List[LabelValue] = Field(default_factory=list)
     custom_metadata: Dict[str, Any] = Field(default_factory=dict)
     header_raw_text: Optional[str] = None
 
@@ -82,6 +120,8 @@ class TableCell(BaseModel):
     is_header: bool = False
     colspan: int = 1
     rowspan: int = 1
+    cell_style: Optional[str] = None
+    borders: Optional[Dict[str, Any]] = None
 
 class Table(BaseModel):
     type: str = "table"
@@ -91,6 +131,9 @@ class Table(BaseModel):
     headers: List[str] = Field(default_factory=list)
     rows: List[List[str]] = Field(default_factory=list)
     alignments: List[str] = Field(default_factory=list)
+    cells: List[List[TableCell]] = Field(default_factory=list)
+    colspan_matrix: List[List[int]] = Field(default_factory=list)
+    rowspan_matrix: List[List[int]] = Field(default_factory=list)
 
 class Section(BaseModel):
     title: str
@@ -110,8 +153,12 @@ class Reference(BaseModel):
 class UniversalDocumentModel(BaseModel):
     version: str = "1.0"
     source_format: str = "DOCX"
+    doc_type: str = "General Document"
     metadata: Metadata = Field(default_factory=Metadata)
     sections: List[Section] = Field(default_factory=list)
+    signatures: List[SignatureBlock] = Field(default_factory=list)
+    annexures: List[Annexure] = Field(default_factory=list)
     references: List[Reference] = Field(default_factory=list)
+    unmapped_elements: List[Dict[str, Any]] = Field(default_factory=list)
     parsing_confidence: float = 96.0
     warnings: List[str] = Field(default_factory=list)

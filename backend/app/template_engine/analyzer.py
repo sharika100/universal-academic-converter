@@ -26,16 +26,67 @@ class TemplateAnalyzer:
         detected_styles = [s.name for s in doc.styles]
         spec.detected_rules.append(f"Detected {len(detected_styles)} DOCX paragraph/character styles")
         
-        if "Title" in detected_styles:
-            spec.detected_rules.append("Title style detected")
-        if "Author" in detected_styles or "Subtitle" in detected_styles:
-            spec.detected_rules.append("Author block style detected")
-        if "Heading 1" in detected_styles:
-            spec.detected_rules.append("Heading hierarchy detected")
-        if "Caption" in detected_styles:
-            spec.detected_rules.append("Figure/Table caption style detected")
+        # Document classification hint
+        full_text = " ".join([p.text for p in doc.paragraphs[:30]]).lower()
+        if any(kw in full_text for kw in ["course delivery manual", "cdm", "syllabus", "course outcome"]):
+            spec.doc_type_hint = "Course Document"
+        elif any(kw in full_text for kw in ["requisition form", "application form", "approval form"]):
+            spec.doc_type_hint = "Institutional Form"
+        else:
+            spec.doc_type_hint = "General Document"
+
+        # 1. Page Setup Analysis
+        if doc.sections:
+            sec = doc.sections[0]
+            spec.page_setup = {
+                "page_width": sec.page_width.inches if sec.page_width else 8.5,
+                "page_height": sec.page_height.inches if sec.page_height else 11.0,
+                "top_margin": sec.top_margin.inches if sec.top_margin else 1.0,
+                "bottom_margin": sec.bottom_margin.inches if sec.bottom_margin else 1.0,
+                "left_margin": sec.left_margin.inches if sec.left_margin else 1.0,
+                "right_margin": sec.right_margin.inches if sec.right_margin else 1.0,
+                "orientation": str(sec.orientation) if hasattr(sec, "orientation") else "PORTRAIT"
+            }
+
+        # 2. Table Specifications Extraction
+        spec_tables = []
+        field_labels = []
+        signature_slots = []
+        
+        for t_idx, tbl in enumerate(doc.tables):
+            rows = len(tbl.rows)
+            cols = len(tbl.columns) if tbl.rows else 0
+            fixed_labels = []
+            editable_slots = []
+            is_signature_table = False
             
-        spec.template_confidence = 97.0
+            for r_idx, row in enumerate(tbl.rows):
+                cell_txts = [c.text.strip() for c in row.cells]
+                for c_idx, txt in enumerate(cell_txts):
+                    if any(kw in txt.lower() for kw in ["signature", "hod", "course instructor", "stream coordinator"]):
+                        is_signature_table = True
+                        
+                    if txt.endswith(":") or any(kw in txt.lower() for kw in ["name", "offering", "semester", "instructor", "sl no", "co no", "code", "description", "questions"]):
+                        fixed_labels.append({"row": r_idx, "col": c_idx, "text": txt})
+                        field_labels.append(txt)
+                    elif not txt or txt.startswith(":") or re.match(r'^[\{\[\<]', txt):
+                        editable_slots.append({"row": r_idx, "col": c_idx, "initial": txt})
+                        
+            if is_signature_table:
+                signature_slots.append({"table_index": t_idx, "rows": rows, "cols": cols})
+                
+            spec_tables.append({
+                "table_index": t_idx,
+                "rows": rows,
+                "cols": cols,
+                "fixed_labels": fixed_labels,
+                "editable_slots": editable_slots
+            })
+            
+        spec.template_tables = spec_tables
+        spec.field_labels = field_labels
+        spec.signature_slots = signature_slots
+        spec.template_confidence = 98.0
         return spec
 
     @staticmethod
