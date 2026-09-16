@@ -1,23 +1,23 @@
-import { issueSignedToken, presignUrl, handleUpload, parseStoreIdFromDelegationToken } from '@vercel/blob';
+import { issueSignedToken, presignUrl, parseStoreIdFromDelegationToken } from '@vercel/blob';
 
-function getBlobToken() {
-  if (process.env.BLOB_READ_WRITE_TOKEN) {
-    return process.env.BLOB_READ_WRITE_TOKEN;
-  }
-  for (const [key, value] of Object.entries(process.env)) {
-    if ((key.endsWith('_READ_WRITE_TOKEN') || key.includes('BLOB')) && typeof value === 'string' && value.startsWith('vercel_blob_')) {
-      return value;
+// Auto-alias store-prefixed Vercel Blob environment variables if standard names are missing
+function ensureBlobEnv() {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    for (const [key, val] of Object.entries(process.env)) {
+      if ((key.endsWith('_READ_WRITE_TOKEN') || key.includes('BLOB_READ_WRITE_TOKEN')) && typeof val === 'string' && val.startsWith('vercel_blob_')) {
+        process.env.BLOB_READ_WRITE_TOKEN = val;
+        break;
+      }
     }
   }
-  return undefined;
-}
-
-function detectAuthMethod() {
-  const token = getBlobToken();
-  if (token) return 'static-token';
-  if (process.env.VERCEL_OIDC_TOKEN || process.env.BLOB_STORE_ID) return 'oidc';
-  if (process.env.VERCEL === '1') return 'vercel-platform-oidc';
-  return 'unknown';
+  if (!process.env.BLOB_STORE_ID) {
+    for (const [key, val] of Object.entries(process.env)) {
+      if ((key.endsWith('_STORE_ID') || key.includes('BLOB_STORE_ID')) && typeof val === 'string' && val.trim() !== '') {
+        process.env.BLOB_STORE_ID = val.trim();
+        break;
+      }
+    }
+  }
 }
 
 export default async function handler(request, response) {
@@ -25,12 +25,11 @@ export default async function handler(request, response) {
     return response.status(405).json({ error: 'Method not allowed' });
   }
 
-  const authMethod = detectAuthMethod();
-  const hasToken = !!getBlobToken();
-  const hasOidc = !!(process.env.VERCEL_OIDC_TOKEN || process.env.BLOB_STORE_ID || process.env.VERCEL === '1');
+  ensureBlobEnv();
 
+  const envKeys = Object.keys(process.env).filter(k => k.includes('BLOB') || k.includes('OIDC') || k.includes('VERCEL'));
   console.log('[UPLOAD_AUTH_ENDPOINT_CALLED] Route: /api/upload-token');
-  console.log(`[BLOB_DIAGNOSTICS] SDK_VERSION: 2.8.0, BLOB_AUTH_METHOD: ${authMethod}, BLOB_STORE_CONFIGURATION_PRESENT: ${hasToken || hasOidc}`);
+  console.log(`[BLOB_DIAGNOSTICS] SDK_VERSION: 2.8.0, Available Blob/Vercel Env Keys: [${envKeys.join(', ')}]`);
 
   try {
     let body;
@@ -51,46 +50,13 @@ export default async function handler(request, response) {
 
     console.log(`[UPLOAD_REQUESTED] filename: ${cleanFilename}, size: ${size}`);
 
-    // A. Handle standard @vercel/blob client event if type is present
-    if (body && body.type && typeof body.type === 'string' && body.type.startsWith('blob.')) {
-      const handleUploadOptions = {
-        body,
-        request,
-        onBeforeGenerateToken: async (pName) => {
-          return {
-            allowedContentTypes: [
-              'application/zip',
-              'application/x-zip-compressed',
-              'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-              'application/x-tex',
-              'text/plain',
-              'application/pdf',
-              'application/octet-stream'
-            ],
-            maximumSizeInBytes: 100 * 1024 * 1024,
-          };
-        },
-        onUploadCompleted: async ({ blob }) => {
-          console.log(`[BLOB_UPLOAD_COMPLETED] pathname: ${blob.pathname}, contentType: ${blob.contentType}`);
-        },
-      };
-
-      const token = getBlobToken();
-      if (token) {
-        handleUploadOptions.token = token;
-      }
-
-      const jsonResponse = await handleUpload(handleUploadOptions);
-      return response.status(200).json(jsonResponse);
-    }
-
-    // B. Direct Signed PUT & GET URL Generation (supports OIDC & private access natively)
+    // Command options for signed token API
     const commandOptions = {};
-    const token = getBlobToken();
-    if (token) {
-      commandOptions.token = token;
+    if (process.env.BLOB_READ_WRITE_TOKEN) {
+      commandOptions.token = process.env.BLOB_READ_WRITE_TOKEN;
     }
 
+    // 1. Issue signed token (scoped for 'put' and 'get' operations)
     const signedToken = await issueSignedToken({
       pathname,
       operations: ['put', 'get'],
@@ -116,8 +82,7 @@ export default async function handler(request, response) {
       console.warn('Could not parse storeId from delegation token:', e.message);
     }
 
-    const canonicalBlobUrl = `https://${storeId}.private.blob.vercel-storage.com/${pathname}`;
-
+    // 2. Generate signed PUT URL for browser direct upload
     const { presignedUrl: uploadUrl } = await presignUrl(signedToken, {
       operation: 'put',
       pathname,
@@ -125,6 +90,7 @@ export default async function handler(request, response) {
       ...commandOptions,
     });
 
+    // 3. Generate signed GET URL for backend private retrieval
     const { presignedUrl: downloadUrl } = await presignUrl(signedToken, {
       operation: 'get',
       pathname,
@@ -132,11 +98,14 @@ export default async function handler(request, response) {
       ...commandOptions,
     });
 
-    console.log(`[BLOB_UPLOAD_AUTHORIZED] pathname: ${pathname}, storeId: ${storeId}`);
+    const canonicalBlobUrl = `https://${storeId}.private.blob.vercel-storage.com/${pathname}`;
+
+    console.log(`[BLOB_AUTH_SUCCESS] Presigned PUT URL generated for pathname: ${pathname}`);
 
     return response.status(200).json({
       uploadUrl,
       downloadUrl,
+      presignedUrl: uploadUrl, // compatibility
       pathname,
       blobUrl: canonicalBlobUrl
     });
@@ -148,9 +117,9 @@ export default async function handler(request, response) {
     }
 
     return response.status(500).json({
-      error: 'STORAGE_CONFIGURATION_ERROR',
-      message: 'Secure large-file storage is not available for this deployment.',
-      detail: error.message || 'Vercel Blob storage authorization failed.'
+      error: 'STORAGE_AUTHORIZATION_ERROR',
+      message: 'Secure large-file storage authorization failed. Please retry.',
+      detail: `${error.name || 'BlobError'}: ${error.message || 'Storage authorization failed.'}`
     });
   }
 }

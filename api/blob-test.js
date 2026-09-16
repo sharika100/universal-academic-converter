@@ -1,22 +1,30 @@
 import { put, get } from '@vercel/blob';
 
-function getBlobToken() {
-  if (process.env.BLOB_READ_WRITE_TOKEN) {
-    return process.env.BLOB_READ_WRITE_TOKEN;
-  }
-  for (const [key, value] of Object.entries(process.env)) {
-    if ((key.endsWith('_READ_WRITE_TOKEN') || key.includes('BLOB')) && typeof value === 'string' && value.startsWith('vercel_blob_')) {
-      return value;
+function ensureBlobEnv() {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    for (const [key, val] of Object.entries(process.env)) {
+      if ((key.endsWith('_READ_WRITE_TOKEN') || key.includes('BLOB_READ_WRITE_TOKEN')) && typeof val === 'string' && val.startsWith('vercel_blob_')) {
+        process.env.BLOB_READ_WRITE_TOKEN = val;
+        break;
+      }
     }
   }
-  return undefined;
+  if (!process.env.BLOB_STORE_ID) {
+    for (const [key, val] of Object.entries(process.env)) {
+      if ((key.endsWith('_STORE_ID') || key.includes('BLOB_STORE_ID')) && typeof val === 'string' && val.trim() !== '') {
+        process.env.BLOB_STORE_ID = val.trim();
+        break;
+      }
+    }
+  }
 }
 
 export default async function handler(request, response) {
-  const token = getBlobToken();
+  ensureBlobEnv();
+
   const options = { access: 'private' };
-  if (token) {
-    options.token = token;
+  if (process.env.BLOB_READ_WRITE_TOKEN) {
+    options.token = process.env.BLOB_READ_WRITE_TOKEN;
   }
 
   const testPath = `test/blob-test-${Date.now()}.txt`;
