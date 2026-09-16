@@ -5,6 +5,7 @@ import tempfile
 import zipfile
 import logging
 import hashlib
+import traceback
 import requests
 import urllib.parse
 from typing import Optional, Dict, Any
@@ -280,13 +281,14 @@ async def analyze_source(
                 udm.sections = sections
                 udm.warnings.extend(parsed_warns)
     except Exception as e:
-        logger.error(f"[{ref_id}] Source analysis exception: {str(e)}")
+        tb_str = traceback.format_exc()
+        logger.error(f"[{ref_id}] Source analysis exception: {str(e)}\n{tb_str}")
         err_code = "DOCX_PARSE_ERROR" if lower_filename.endswith(".docx") else "LATEX_PROJECT_ANALYSIS_ERROR"
         return JSONResponse(status_code=400, content=create_error_payload(
             stage="source_analysis",
             error_code=err_code,
             message=f"Unable to parse uploaded manuscript ({clean_filename}).",
-            detail=str(e),
+            detail=f"{str(e)} | Traceback: {tb_str[:250]}",
             ref_id=ref_id
         ))
         
@@ -479,13 +481,14 @@ async def analyze_source_from_storage(req: StorageAnalysisRequest):
                 udm.sections = sections
                 udm.warnings.extend(parsed_warns)
     except Exception as e:
-        logger.error(f"[{ref_id}] Storage source analysis exception: {str(e)}")
+        tb_str = traceback.format_exc()
+        logger.error(f"[{ref_id}] Storage source analysis exception: {str(e)}\n{tb_str}")
         err_code = "DOCX_PARSE_ERROR" if lower_filename.endswith(".docx") else "LATEX_PROJECT_ANALYSIS_ERROR"
         return JSONResponse(status_code=400, content=create_error_payload(
             stage="source_analysis",
             error_code=err_code,
             message=f"Unable to parse manuscript from storage ({clean_filename}).",
-            detail=str(e),
+            detail=f"{str(e)} | Traceback: {tb_str[:250]}",
             ref_id=ref_id
         ))
 
