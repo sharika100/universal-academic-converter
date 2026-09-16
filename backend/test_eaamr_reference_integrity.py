@@ -88,6 +88,10 @@ def run_reference_integrity_test():
         print("REFERENCE INTEGRITY REPORT:")
         print(json.dumps(report, indent=2))
 
+        assert gen_bib_text.count('{') == gen_bib_text.count('}'), f"BibTeX brace mismatch! Opening: {gen_bib_text.count('{')}, Closing: {gen_bib_text.count('}')}"
+        assert "cas-refs" not in gen_tex.split("\\bibliography{references}")[0], "Leaked bibliography filename in body text!"
+        assert "cas-model2-names" not in gen_tex.split("\\bibliography{references}")[0], "Leaked bibliography style in body text!"
+        
         assert report["generated_citations"] == report["source_citations"], "In-text citations count mismatch!"
         assert report["generated_bib_entries"] == report["source_bib_entries"], "BibTeX entries count mismatch!"
         assert len(report["missing_citations"]) == 0, f"Missing citations: {report['missing_citations']}"

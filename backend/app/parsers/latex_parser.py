@@ -214,6 +214,10 @@ class LatexParser:
                     title = title_m.group(1).strip() if title_m else "Untitled Reference"
                     author_list = [a.strip() for a in author_m.group(1).split("and")] if author_m else []
                     
+                    f_strip = fields_str.strip()
+                    if not f_strip.endswith('}'):
+                        f_strip += '\n}'
+                        
                     references.append(Reference(
                         id=f"ref_{cite_key}",
                         cite_key=cite_key,
@@ -222,7 +226,7 @@ class LatexParser:
                         authors=author_list,
                         journal=journal_m.group(1).strip() if journal_m else None,
                         year=year_m.group(1) if year_m else None,
-                        raw_bibtex=f"@{entry_type}{{{cite_key},\n{fields_str.strip()}\n}}"
+                        raw_bibtex=f"@{entry_type}{{{cite_key},\n{f_strip}"
                     ))
             except Exception:
                 pass
@@ -245,6 +249,11 @@ class LatexParser:
     def _parse_body(content: str, base_dir: str) -> Tuple[List[Section], List[str]]:
         sections = []
         warnings = []
+        
+        # Strip non-body metadata commands and bio environments before section splitting
+        content = re.sub(r'\\(?:bibliography|bibliographystyle|nocite|biboptions|printbibliography)\{[^}]*\}', '', content, flags=re.DOTALL)
+        content = re.sub(r'\\begin\{bio(?:graphy)?\}.*?\\end\{bio(?:graphy)?\}', '', content, flags=re.DOTALL)
+        content = re.sub(r'\\bio(?:\[[^\]]*\])?\{[^}]*\}.*?(?=\\endbio|\\section|\Z)', '', content, flags=re.DOTALL)
         
         # Split content by \section
         raw_sections = re.split(r'\\section\*?\{([^}]+)\}', content)
@@ -353,6 +362,9 @@ class LatexParser:
                 clean_p_text = re.sub(r'\\includegraphics(?:\[[^\]]*\])?\{[^}]+\}', '', clean_p_text)
                 clean_p_text = re.sub(r'\\caption(?:of\{figure\})?\{[^}]+\}', '', clean_p_text)
                 clean_p_text = re.sub(r'\\label\{[^}]+\}', '', clean_p_text) # STRIP LABELS PREVENTING LEAK
+                clean_p_text = re.sub(r'\\(?:bibliography|bibliographystyle|nocite|biboptions|printbibliography)\{[^}]*\}', '', clean_p_text, flags=re.DOTALL)
+                clean_p_text = re.sub(r'\\begin\{bio(?:graphy)?\}.*?\\end\{bio(?:graphy)?\}', '', clean_p_text, flags=re.DOTALL)
+                clean_p_text = re.sub(r'\\bio(?:\[[^\]]*\])?\{[^}]*\}.*?(?=\\endbio|\Z)', '', clean_p_text, flags=re.DOTALL)
                 
                 # Protect citations, refs, and math using temporary placeholders
                 placeholders = []
