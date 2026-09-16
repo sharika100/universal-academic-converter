@@ -27,3 +27,4 @@ test_extract_dest/
 .idea/
 .DS_Store
 *.log
+*.db

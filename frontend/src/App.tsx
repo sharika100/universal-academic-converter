@@ -12,7 +12,11 @@ import { EntrypointSelectModal } from './components/EntrypointSelectModal';
 import { ResponsibleUseModal } from './components/ResponsibleUseModal';
 import { ErrorPanel, APIErrorState } from './components/ErrorPanel';
 import { DebugPanel } from './components/DebugPanel';
+import { FeedbackCard } from './components/FeedbackCard';
 import { Footer } from './components/Footer';
+import { AdminLogin } from './admin/AdminLogin';
+import { AdminDashboard } from './admin/AdminDashboard';
+import { logAnalyticsEvent, logAnalyticsError } from './utils/analytics';
 import { Play, Search, Loader2, ShieldCheck, ShieldAlert } from 'lucide-react';
 
 const PROGRESS_STEPS = [
@@ -73,7 +77,19 @@ export const App: React.FC = () => {
   const [activeEndpoint, setActiveEndpoint] = useState<string>('/api/analyze-source');
   const [httpStatus, setHttpStatus] = useState<number | null>(200);
 
+  const [currentPath, setCurrentPath] = useState<string>(window.location.pathname);
+  const [adminToken, setAdminToken] = useState<string | null>(localStorage.getItem('admin_token'));
+  const [adminUsername, setAdminUsername] = useState<string>(localStorage.getItem('admin_username') || 'admin');
+
   useEffect(() => {
+    // Log non-blocking page view telemetry
+    logAnalyticsEvent({ event_type: 'page_view' });
+
+    const handlePopState = () => {
+      setCurrentPath(window.location.pathname);
+    };
+    window.addEventListener('popstate', handlePopState);
+
     const loadPresets = async () => {
       try {
         let res = await fetch('/api/presets').catch(() => null);
@@ -92,6 +108,8 @@ export const App: React.FC = () => {
       }
     };
     loadPresets();
+
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   const handleSelectPreset = async (preset: any) => {
@@ -469,61 +487,134 @@ export const App: React.FC = () => {
       return;
     }
 
-    setConverting(true);
-    setApiError(null);
-    setProgressStep(0);
+      setConverting(true);
+      setApiError(null);
+      setProgressStep(0);
 
-    const interval = setInterval(() => {
-      setProgressStep((prev) => (prev < PROGRESS_STEPS.length - 1 ? prev + 1 : prev));
-    }, 450);
+      const conversionTypeStr = `${sourceFormat} → ${destFormat}`;
+      const startTime = Date.now();
 
-    try {
-      setActiveEndpoint('/api/convert');
-      const formData = new FormData();
-      formData.append('job_id', jobId);
-      if (sourceUdm) {
-        formData.append('udm_json_str', JSON.stringify(sourceUdm));
-      }
-      if (destSpec) {
-        formData.append('spec_json_str', JSON.stringify(destSpec));
-      }
-
-      const res = await fetch('/api/convert', { method: 'POST', body: formData });
-      setHttpStatus(res.status);
-      const json = await res.json();
-
-      clearInterval(interval);
-      setProgressStep(PROGRESS_STEPS.length - 1);
-
-      if (json.status === 'SUCCESS') {
-        setReport(json.report);
-        if (json.mapping) {
-          setMapping(json.mapping);
-        }
-      } else {
-        setApiError({
-          stage: json.stage || 'conversion',
-          error_code: json.error_code || 'COMPILATION_ERROR',
-          message: json.message || 'Conversion error occurred during rendering.',
-          detail: json.detail || 'Unknown failure detail',
-          reference_id: json.reference_id || `REF-CONV-${Date.now().toString(36).toUpperCase()}`
-        });
-      }
-    } catch (err: any) {
-      clearInterval(interval);
-      setApiError({
-        stage: 'conversion',
-        error_code: 'CONVERSION_ERROR',
-        message: 'Error executing document conversion.',
-        detail: String(err),
-        reference_id: `REF-CONV-ERR-${Date.now().toString(36).toUpperCase()}`
+      logAnalyticsEvent({
+        event_type: 'conversion_attempt',
+        conversion_type: conversionTypeStr,
+        destination_template: destFormat,
+        status: 'started'
       });
-    } finally {
-      setConverting(false);
-    }
+
+      const interval = setInterval(() => {
+        setProgressStep((prev) => (prev < PROGRESS_STEPS.length - 1 ? prev + 1 : prev));
+      }, 450);
+
+      try {
+        setActiveEndpoint('/api/convert');
+        const formData = new FormData();
+        formData.append('job_id', jobId);
+        if (sourceUdm) {
+          formData.append('udm_json_str', JSON.stringify(sourceUdm));
+        }
+        if (destSpec) {
+          formData.append('spec_json_str', JSON.stringify(destSpec));
+        }
+
+        const res = await fetch('/api/convert', { method: 'POST', body: formData });
+        setHttpStatus(res.status);
+        const json = await res.json();
+
+        clearInterval(interval);
+        setProgressStep(PROGRESS_STEPS.length - 1);
+        const duration = Date.now() - startTime;
+
+        if (json.status === 'SUCCESS') {
+          setReport(json.report);
+          if (json.mapping) {
+            setMapping(json.mapping);
+          }
+          logAnalyticsEvent({
+            event_type: 'conversion_result',
+            conversion_type: conversionTypeStr,
+            destination_template: destFormat,
+            status: 'completed',
+            conversion_time_ms: duration,
+            total_time_ms: duration,
+            validation_passed: json.report?.validation_checks?.overall_passed ?? true,
+            compilation_passed: json.report?.pdf_compiled ?? true
+          });
+        } else {
+          setApiError({
+            stage: json.stage || 'conversion',
+            error_code: json.error_code || 'COMPILATION_ERROR',
+            message: json.message || 'Conversion error occurred during rendering.',
+            detail: json.detail || 'Unknown failure detail',
+            reference_id: json.reference_id || `REF-CONV-${Date.now().toString(36).toUpperCase()}`
+          });
+          logAnalyticsEvent({
+            event_type: 'conversion_result',
+            conversion_type: conversionTypeStr,
+            destination_template: destFormat,
+            status: 'failed',
+            conversion_time_ms: duration,
+            total_time_ms: duration
+          });
+          logAnalyticsError('conversion', json.error_code || 'COMPILATION_ERROR', conversionTypeStr, destFormat);
+        }
+      } catch (err: any) {
+        clearInterval(interval);
+        const duration = Date.now() - startTime;
+        setApiError({
+          stage: 'conversion',
+          error_code: 'CONVERSION_ERROR',
+          message: 'Error executing document conversion.',
+          detail: String(err),
+          reference_id: `REF-CONV-ERR-${Date.now().toString(36).toUpperCase()}`
+        });
+        logAnalyticsEvent({
+          event_type: 'conversion_result',
+          conversion_type: conversionTypeStr,
+          destination_template: destFormat,
+          status: 'failed',
+          conversion_time_ms: duration,
+          total_time_ms: duration
+        });
+        logAnalyticsError('conversion', 'CONVERSION_ERROR', conversionTypeStr, destFormat);
+      } finally {
+        setConverting(false);
+      }
   };
 
   const isConvertEnabled = !!sourceUdm && !!destSpec && !apiError && !analyzing && !converting && hasAcknowledged;
+
+  if (currentPath === '/admin/analytics' || currentPath === '/admin/login' || currentPath === '/admin') {
+    if (adminToken) {
+      return (
+        <AdminDashboard
+          token={adminToken}
+          username={adminUsername}
+          onLogout={() => {
+            setAdminToken(null);
+            localStorage.removeItem('admin_token');
+            window.history.pushState({}, '', '/');
+            setCurrentPath('/');
+          }}
+          onBackToConverter={() => {
+            window.history.pushState({}, '', '/');
+            setCurrentPath('/');
+          }}
+        />
+      );
+    }
+    return (
+      <AdminLogin
+        onLoginSuccess={(token, user) => {
+          setAdminToken(token);
+          setAdminUsername(user);
+          localStorage.setItem('admin_token', token);
+          localStorage.setItem('admin_username', user);
+          window.history.pushState({}, '', '/admin/analytics');
+          setCurrentPath('/admin/analytics');
+        }}
+      />
+    );
+  }
 
   return (
     <div className="app-container">
@@ -729,10 +820,13 @@ export const App: React.FC = () => {
 
       {/* Conversion Report & Download Page View */}
       {report && (
-        <ReportView
-          report={report}
-          onOpenPdfModal={() => setShowPdfModal(true)}
-        />
+        <>
+          <ReportView
+            report={report}
+            onOpenPdfModal={() => setShowPdfModal(true)}
+          />
+          <FeedbackCard conversionType={`${sourceFormat} → ${destFormat}`} />
+        </>
       )}
 
       {/* PDF Modal */}

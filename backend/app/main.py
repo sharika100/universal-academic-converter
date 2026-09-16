@@ -30,6 +30,7 @@ from app.renderers.latex_renderer import LatexRenderer
 from app.validation.integrity_checker import IntegrityChecker
 from app.validation.template_validator import TemplateValidator
 from app.compilation.latex_sandbox import LatexSandbox
+from app.api.analytics import router as analytics_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("UniversalConverter")
@@ -47,6 +48,8 @@ if hasattr(Request._get_form, "__kwdefaults__") and Request._get_form.__kwdefaul
     Request._get_form.__kwdefaults__["max_part_size"] = MAX_PART_SIZE
 
 app = FastAPI(title="Universal Academic Format Converter API")
+
+app.include_router(analytics_router)
 
 app.add_middleware(
     CORSMiddleware,
