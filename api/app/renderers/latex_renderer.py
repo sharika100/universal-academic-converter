@@ -174,16 +174,34 @@ class LatexRenderer:
         affiliations = udm.metadata.affiliations
         
         if is_springer or spec.author_style == "springer":
-            for a in authors:
-                parts = a.name.split()
-                fnm = parts[0] if parts else ""
-                sur = " ".join(parts[1:]) if len(parts) > 1 else a.name
+            for a_idx, a in enumerate(authors):
+                clean_name = re.sub(r'^(?:Dr\.|Prof\.|Mr\.|Ms\.|Mrs\.|Doctor)\s+', '', a.name, flags=re.I)
+                parts = clean_name.split()
+                if len(parts) == 1:
+                    fnm, sur = parts[0], ""
+                elif len(parts) == 2:
+                    fnm, sur = parts[0], parts[1]
+                else:
+                    fnm, sur = " ".join(parts[:-1]), parts[-1]
+                    
                 aff_tag = ",".join(a.affiliation_ids) if a.affiliation_ids else "1"
                 email_str = f"\\email{{{a.email}}}" if hasattr(a, 'email') and a.email else ""
-                lines.append(f"\\author[{aff_tag}]{{\\fnm{{{fnm}}} \\sur{{{sur}}}}}{email_str}")
+                is_cor = (a_idx == 0) and bool(a.email)
+                star = "*" if is_cor else ""
+                lines.append(f"\\author{star}[{aff_tag}]{{\\fnm{{{fnm}}} \\sur{{{sur}}}}}{email_str}")
             for aff in affiliations:
                 if aff.institution:
                     lines.append(f"\\affil[{aff.id}]{{\\orgname{{{aff.institution}}}}}")
+            lines.append("\\maketitle\n")
+        elif spec.author_style == "elsevier":
+            for a_idx, a in enumerate(authors):
+                aff_tag = ",".join(a.affiliation_ids) if a.affiliation_ids else "1"
+                email_str = f"\\ead{{{a.email}}}" if hasattr(a, 'email') and a.email else ""
+                cor_str = "\\cormark[1]" if a_idx == 0 else ""
+                lines.append(f"\\author[{aff_tag}]{{{a.name}}}{cor_str}{email_str}")
+            for aff in affiliations:
+                if aff.institution:
+                    lines.append(f"\\address[{aff.id}]{{{aff.institution}}}")
             lines.append("\\maketitle\n")
         elif spec.author_style == "ieee" or spec.document_class == "IEEEtran":
             author_blocks = []
@@ -206,11 +224,10 @@ class LatexRenderer:
                     author_blocks.append(f"\\IEEEauthorblockN{{{a.name}}}")
             lines.append(f"\\author{{\n{ '\n\\and\n'.join(author_blocks) }\n}}\n\\maketitle\n")
         else: # Standard / Default
-            author_names = []
             for a in authors:
                 inst_tag = ",".join(a.affiliation_ids) if a.affiliation_ids else "1"
-                author_names.append(f"{a.name}$^{{{inst_tag}}}$")
-            lines.append(f"\\author{{{', '.join(author_names)}}}")
+                email_str = f"\\thanks{{{a.email}}}" if hasattr(a, 'email') and a.email else ""
+                lines.append(f"\\author{{{a.name}$^{{{inst_tag}}}${email_str}}}")
             if affiliations:
                 inst_lines = [f"$^{{{aff.id}}}$ {aff.institution}" for aff in affiliations if aff.institution]
                 if inst_lines:

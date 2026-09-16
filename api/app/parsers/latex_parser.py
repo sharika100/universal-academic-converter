@@ -206,7 +206,12 @@ class LatexParser:
                         aff_ids = [t.strip() for t in aff_tags.split(',') if t.strip()]
                         if not aff_ids and affiliations:
                             aff_ids = [affiliations[0].id]
-                        authors.append(Author(name=clean_name, affiliation_ids=aff_ids))
+                        
+                        snip = content[m.start():min(len(content), m.end()+300)]
+                        em_m = re.search(r'\\(?:ead|email)\{([^}]+)\}', snip)
+                        author_email = em_m.group(1).strip() if em_m else None
+                        
+                        authors.append(Author(name=clean_name, affiliation_ids=aff_ids, email=author_email))
 
         if authors:
             metadata.authors = authors

@@ -108,10 +108,76 @@ class TemplateValidator:
             if "\\title{Untitled Document}" in main_content:
                 errors.append("Validation Failure: Rendered title is 'Untitled Document' despite valid source title.")
 
-        # 8. Check author count matches UDM authors
-        rendered_authors = re.findall(r'\\author(?:\[[^\]]*\])?\{([^}]+)\}', main_content)
-        if len(rendered_authors) < len(udm.metadata.authors):
-            errors.append(f"Validation Failure: Rendered authors count ({len(rendered_authors)}) is less than UDM authors count ({len(udm.metadata.authors)}).")
+        # 8. Check author count matches UDM authors & preserve author identity
+        udm_author_count = len(udm.metadata.authors)
+        if udm_author_count > 0:
+            author_matches = re.finditer(r'\\author[*]?\s*(?:\[[^\]]*\])?\s*\{', main_content)
+            author_decls = []
+            for m in author_matches:
+                start_idx = m.end()
+                depth = 1
+                i = start_idx
+                while i < len(main_content) and depth > 0:
+                    if main_content[i] == '{':
+                        depth += 1
+                    elif main_content[i] == '}':
+                        depth -= 1
+                    i += 1
+                author_decls.append(main_content[start_idx:i-1])
+
+            ieee_author_decls = re.findall(r'\\IEEEauthorblockN\{([^}]+)\}', main_content)
+            
+            parsed_rendered_names = []
+            if author_decls:
+                for decl in author_decls:
+                    if r'\and' in decl:
+                        for sub_n in decl.split(r'\and'):
+                            clean_sub = re.sub(r'\\[a-zA-Z]+\{([^}]+)\}', r'\1', sub_n)
+                            clean_sub = re.sub(r'\\[a-zA-Z]+', '', clean_sub).strip()
+                            if clean_sub:
+                                parsed_rendered_names.append(clean_sub)
+                    else:
+                        clean_n = re.sub(r'\\[a-zA-Z]+\{([^}]+)\}', r'\1', decl)
+                        clean_n = re.sub(r'\\[a-zA-Z]+', '', clean_n).strip()
+                        if clean_n:
+                            parsed_rendered_names.append(clean_n)
+            elif ieee_author_decls:
+                for decl in ieee_author_decls:
+                    clean_n = re.sub(r'\\[a-zA-Z]+\{([^}]+)\}', r'\1', decl)
+                    clean_n = re.sub(r'\\[a-zA-Z]+', '', clean_n).strip()
+                    if clean_n:
+                        parsed_rendered_names.append(clean_n)
+
+            rendered_author_count = len(parsed_rendered_names)
+
+            if rendered_author_count < udm_author_count:
+                errors.append(
+                    f"Validation Failure: Rendered authors count ({rendered_author_count}) "
+                    f"is less than UDM authors count ({udm_author_count})."
+                )
+                
+            # Additional strict author validation checks
+            TITLES = {'dr', 'prof', 'mr', 'ms', 'mrs', 'doctor', 'phd'}
+            for u_author in udm.metadata.authors:
+                u_name_parts = [p.lower() for p in re.findall(r'[a-zA-Z]{3,}', u_author.name) if p.lower() not in TITLES]
+                if u_name_parts and not any(all(p in r_name.lower() for p in u_name_parts) for r_name in parsed_rendered_names):
+                    errors.append(f"Validation Failure: UDM author '{u_author.name}' is missing in rendered document author declarations.")
+
+            seen_r_names = set()
+            for r_name in parsed_rendered_names:
+                norm_r = re.sub(r'[^a-z]', '', r_name.lower())
+                if norm_r and norm_r in seen_r_names:
+                    errors.append(f"Validation Failure: Duplicate author name '{r_name}' detected in rendered document.")
+                seen_r_names.add(norm_r)
+                
+            if len(udm.metadata.authors) >= 2:
+                a1_name_part = re.findall(r'[a-zA-Z]{3,}', udm.metadata.authors[0].name)
+                a2_name_part = re.findall(r'[a-zA-Z]{3,}', udm.metadata.authors[1].name)
+                if a1_name_part and a2_name_part:
+                    pos1 = main_content.lower().find(a1_name_part[0].lower())
+                    pos2 = main_content.lower().find(a2_name_part[0].lower())
+                    if pos1 != -1 and pos2 != -1 and pos1 > pos2:
+                        errors.append(f"Validation Failure: Author order inverted in rendered document (Author 2 appears before Author 1).")
 
         # 9. Check figures count
         rendered_figs = re.findall(r'\\begin\{figure\}', main_content)
