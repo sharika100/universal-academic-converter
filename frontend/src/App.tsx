@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { upload } from '@vercel/blob/client';
 import { Header } from './components/Header';
 import { PresetsBar } from './components/PresetsBar';
 import { SourcePanel } from './components/SourcePanel';
@@ -15,17 +16,24 @@ import { Footer } from './components/Footer';
 import { Play, Search, Loader2, ShieldCheck, ShieldAlert, CheckCircle2 } from 'lucide-react';
 
 const PROGRESS_STEPS = [
-  "1. Uploading files",
-  "2. Extracting project archives",
-  "3. Analyzing source manuscript",
-  "4. Analyzing destination template",
-  "5. Building Universal Document Model (UDM)",
-  "6. Mapping source content onto destination",
-  "7. Generating new target LaTeX project",
-  "8. Compiling target PDF preview in sandbox",
-  "9. Validating content integrity & template rules",
-  "10. Preparing download package"
+  "1. Uploading source project...",
+  "2. Extracting & validating project archives...",
+  "3. Analyzing LaTeX source manuscript & entrypoints...",
+  "4. Analyzing destination template package...",
+  "5. Building Universal Document Model (UDM)...",
+  "6. Mapping source content onto destination...",
+  "7. Generating new target LaTeX project...",
+  "8. Compiling target PDF preview in sandbox...",
+  "9. Validating content integrity & template rules...",
+  "10. Preparing download package..."
 ];
+
+async function calculateSHA256(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 export const App: React.FC = () => {
   const [presets, setPresets] = useState<any[]>([]);
@@ -35,6 +43,7 @@ export const App: React.FC = () => {
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [sourceTree, setSourceTree] = useState<any[]>([]);
   const [sourceUdm, setSourceUdm] = useState<any | null>(null);
+  const [sourceProjectSummary, setSourceProjectSummary] = useState<any | null>(null);
 
   const [destFormat, setDestFormat] = useState<string>('LaTeX Project ZIP');
   const [destFile, setDestFile] = useState<File | null>(null);
@@ -90,6 +99,7 @@ export const App: React.FC = () => {
     setSourceFormat(preset.source_type);
     setDestFormat(preset.dest_type);
     setSourceUdm(null);
+    setSourceProjectSummary(null);
     setDestSpec(null);
     setReport(null);
     setMapping(null);
@@ -139,15 +149,52 @@ export const App: React.FC = () => {
     setApiError(null);
 
     try {
+      const LARGE_FILE_THRESHOLD = 3.5 * 1024 * 1024; // 3.5 MB threshold below Vercel 4.5 MB function limit
+      let srcRes: Response;
+
       // 1. Analyze Source
-      setActiveEndpoint('/api/analyze-source');
-      const srcData = new FormData();
-      srcData.append('file', sourceFile);
-      if (overrideEntrypoint || selectedEntrypoint) {
-        srcData.append('selected_entrypoint', overrideEntrypoint || selectedEntrypoint);
+      if (sourceFile.size > LARGE_FILE_THRESHOLD) {
+        console.log(`Source file size (${(sourceFile.size / 1024 / 1024).toFixed(2)} MB) exceeds standard multipart threshold. Routing via Direct Storage Upload...`);
+        try {
+          const srcHash = await calculateSHA256(sourceFile);
+          const blob = await upload(sourceFile.name, sourceFile, {
+            access: 'public',
+            handleUploadUrl: '/api/upload-token',
+          });
+
+          setActiveEndpoint('/api/analyze-source-from-storage');
+          srcRes = await fetch('/api/analyze-source-from-storage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              upload_id: `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+              blob_url: blob.url,
+              filename: sourceFile.name,
+              sha256: srcHash,
+              selected_entrypoint: overrideEntrypoint || selectedEntrypoint,
+              source_type: 'latex_project'
+            })
+          });
+        } catch (uploadErr: any) {
+          console.warn("Direct storage upload fallback to POST /api/analyze-source:", uploadErr);
+          setActiveEndpoint('/api/analyze-source');
+          const srcData = new FormData();
+          srcData.append('file', sourceFile);
+          if (overrideEntrypoint || selectedEntrypoint) {
+            srcData.append('selected_entrypoint', overrideEntrypoint || selectedEntrypoint);
+          }
+          srcRes = await fetch('/api/analyze-source', { method: 'POST', body: srcData });
+        }
+      } else {
+        setActiveEndpoint('/api/analyze-source');
+        const srcData = new FormData();
+        srcData.append('file', sourceFile);
+        if (overrideEntrypoint || selectedEntrypoint) {
+          srcData.append('selected_entrypoint', overrideEntrypoint || selectedEntrypoint);
+        }
+        srcRes = await fetch('/api/analyze-source', { method: 'POST', body: srcData });
       }
 
-      const srcRes = await fetch('/api/analyze-source', { method: 'POST', body: srcData });
       setHttpStatus(srcRes.status);
 
       if (!srcRes.ok) {
@@ -156,19 +203,22 @@ export const App: React.FC = () => {
           errorData = await srcRes.json();
         } catch {
           const text = await srcRes.text().catch(() => '');
+          const defaultErrCode = sourceFile.name.toLowerCase().endsWith('.docx') ? 'DOCX_PARSE_ERROR' : 'LATEX_PROJECT_ANALYSIS_ERROR';
           errorData = {
             stage: 'source_analysis',
-            error_code: srcRes.status === 404 ? 'ENDPOINT_NOT_FOUND' : 'DOCX_PARSE_ERROR',
-            message: srcRes.status === 404
-              ? 'Source analysis endpoint (/api/analyze-source) was not found on the server.'
-              : `Server returned HTTP ${srcRes.status} error during source analysis.`,
-            detail: text.slice(0, 150) || srcRes.statusText,
+            error_code: srcRes.status === 413 ? 'LATEX_PROJECT_UPLOAD_ERROR' : (srcRes.status === 404 ? 'ENDPOINT_NOT_FOUND' : defaultErrCode),
+            message: srcRes.status === 413
+              ? `Source project upload failed: file size (${(sourceFile.size / 1024 / 1024).toFixed(2)} MB) exceeded function limit.`
+              : (srcRes.status === 404
+                ? 'Source analysis endpoint (/api/analyze-source) was not found on the server.'
+                : `Server returned HTTP ${srcRes.status} error during source analysis.`),
+            detail: text.slice(0, 200) || srcRes.statusText,
             reference_id: `REF-SRC-${Date.now().toString(36).toUpperCase()}`
           };
         }
         setApiError({
           stage: errorData.stage || 'source_analysis',
-          error_code: errorData.error_code || 'DOCX_PARSE_ERROR',
+          error_code: errorData.error_code || 'LATEX_PROJECT_ANALYSIS_ERROR',
           message: errorData.message || 'Unable to analyze uploaded manuscript file.',
           detail: errorData.detail || srcRes.statusText,
           reference_id: errorData.reference_id || `REF-SRC-${Date.now().toString(36).toUpperCase()}`
@@ -180,6 +230,9 @@ export const App: React.FC = () => {
       setJobId(srcJson.job_id);
       setSourceTree(srcJson.file_tree || []);
       setSourceUdm(srcJson.udm);
+      if (srcJson.project_summary) {
+        setSourceProjectSummary(srcJson.project_summary);
+      }
       if (srcJson.possible_entrypoints) {
         setPossibleEntrypoints(srcJson.possible_entrypoints);
         if (srcJson.possible_entrypoints.length > 1 && !overrideEntrypoint && !selectedEntrypoint) {
@@ -188,12 +241,42 @@ export const App: React.FC = () => {
       }
 
       // 2. Analyze Template
-      setActiveEndpoint('/api/analyze-template');
-      const destData = new FormData();
-      destData.append('file', destFile);
-      destData.append('job_id', srcJson.job_id);
+      let destRes: Response;
+      if (destFile.size > LARGE_FILE_THRESHOLD) {
+        try {
+          const destHash = await calculateSHA256(destFile);
+          const blob = await upload(destFile.name, destFile, {
+            access: 'public',
+            handleUploadUrl: '/api/upload-token',
+          });
 
-      const destRes = await fetch('/api/analyze-template', { method: 'POST', body: destData });
+          setActiveEndpoint('/api/analyze-template-from-storage');
+          destRes = await fetch('/api/analyze-template-from-storage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              job_id: srcJson.job_id,
+              blob_url: blob.url,
+              filename: destFile.name,
+              sha256: destHash
+            })
+          });
+        } catch (destUploadErr: any) {
+          console.warn("Direct storage template upload fallback to POST /api/analyze-template:", destUploadErr);
+          setActiveEndpoint('/api/analyze-template');
+          const destData = new FormData();
+          destData.append('file', destFile);
+          destData.append('job_id', srcJson.job_id);
+          destRes = await fetch('/api/analyze-template', { method: 'POST', body: destData });
+        }
+      } else {
+        setActiveEndpoint('/api/analyze-template');
+        const destData = new FormData();
+        destData.append('file', destFile);
+        destData.append('job_id', srcJson.job_id);
+        destRes = await fetch('/api/analyze-template', { method: 'POST', body: destData });
+      }
+
       setHttpStatus(destRes.status);
 
       if (!destRes.ok) {
@@ -204,7 +287,7 @@ export const App: React.FC = () => {
           const text = await destRes.text().catch(() => '');
           errorData = {
             stage: 'template_analysis',
-            error_code: destRes.status === 404 ? 'ENDPOINT_NOT_FOUND' : 'TEMPLATE_ANALYSIS_ERROR',
+            error_code: destRes.status === 413 ? 'TEMPLATE_ANALYSIS_ERROR' : (destRes.status === 404 ? 'ENDPOINT_NOT_FOUND' : 'TEMPLATE_ANALYSIS_ERROR'),
             message: destRes.status === 404
               ? 'Destination template analysis endpoint (/api/analyze-template) was not found on the server.'
               : `Server returned HTTP ${destRes.status} error during template analysis.`,
@@ -249,7 +332,7 @@ export const App: React.FC = () => {
     } catch (err: any) {
       setApiError({
         stage: 'source_analysis',
-        error_code: 'UNKNOWN_ERROR',
+        error_code: 'LATEX_PROJECT_ANALYSIS_ERROR',
         message: 'An unexpected client error occurred during analysis.',
         detail: String(err),
         reference_id: `REF-ERR-${Date.now().toString(36).toUpperCase()}`
@@ -326,7 +409,7 @@ export const App: React.FC = () => {
       clearInterval(interval);
       setApiError({
         stage: 'conversion',
-        error_code: 'UNKNOWN_ERROR',
+        error_code: 'CONVERSION_ERROR',
         message: 'Error executing document conversion.',
         detail: String(err),
         reference_id: `REF-CONV-ERR-${Date.now().toString(36).toUpperCase()}`
@@ -536,6 +619,7 @@ export const App: React.FC = () => {
           sourceUdm={sourceUdm}
           destSpec={destSpec}
           mapping={mapping}
+          sourceProjectSummary={sourceProjectSummary}
         />
       )}
 

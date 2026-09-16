@@ -46,9 +46,10 @@ interface AnalysisViewProps {
   sourceUdm: UdmData | null;
   destSpec: SpecData | null;
   mapping: MappingData | null;
+  sourceProjectSummary?: any;
 }
 
-export const AnalysisView: React.FC<AnalysisViewProps> = ({ sourceUdm, destSpec, mapping }) => {
+export const AnalysisView: React.FC<AnalysisViewProps> = ({ sourceUdm, destSpec, mapping, sourceProjectSummary }) => {
   if (!sourceUdm || !destSpec) return null;
 
   const totalParas = sourceUdm.sections.reduce((acc, s) => acc + (s.blocks ? s.blocks.filter((b: any) => b.type === 'paragraph').length : 0), 0);

@@ -54,7 +54,7 @@ def find_latex_entrypoint(base_dir: str) -> Tuple[Optional[str], List[str], List
                         content = fh.read()
                         if r"\documentclass" in content:
                             candidates.append(rel_path)
-                            if f.lower() in ["main.tex", "paper.tex", "manuscript.tex", "bare_conf.tex"] or primary is None:
+                            if f.lower() in ["main.tex", "paper.tex", "manuscript.tex", "bare_conf.tex", "eaamrwithauthor.tex"] or primary is None:
                                 primary = rel_path
                 except Exception:
                     pass
@@ -65,3 +65,54 @@ def find_latex_entrypoint(base_dir: str) -> Tuple[Optional[str], List[str], List
         primary = all_tex[0]
         
     return primary, candidates, all_tex
+
+def summarize_latex_project(base_dir: str) -> Dict[str, Any]:
+    """Inspects a LaTeX project directory and extracts a structured summary report."""
+    primary, candidates, all_tex = find_latex_entrypoint(base_dir)
+    
+    cls_files = []
+    bib_files = []
+    sty_files = []
+    bst_files = []
+    figures = []
+    other_files = []
+    total_size = 0
+    total_files = 0
+    
+    for root, _, files in os.walk(base_dir):
+        for f in files:
+            total_files += 1
+            full_p = os.path.join(root, f)
+            sz = os.path.getsize(full_p)
+            total_size += sz
+            rel_path = os.path.relpath(full_p, base_dir).replace("\\", "/")
+            ext = os.path.splitext(f)[1].lower()
+            
+            if ext == ".cls":
+                cls_files.append(rel_path)
+            elif ext == ".bib":
+                bib_files.append(rel_path)
+            elif ext == ".sty":
+                sty_files.append(rel_path)
+            elif ext == ".bst":
+                bst_files.append(rel_path)
+            elif ext in [".png", ".jpg", ".jpeg", ".pdf", ".eps"]:
+                figures.append(rel_path)
+            elif ext not in [".tex"]:
+                other_files.append(rel_path)
+                
+    alt_tex = [t for t in candidates if t != primary]
+    
+    return {
+        "main_tex": primary,
+        "alt_tex": alt_tex,
+        "all_tex": all_tex,
+        "cls_files": cls_files,
+        "bib_files": bib_files,
+        "sty_files": sty_files,
+        "bst_files": bst_files,
+        "figures": figures,
+        "other_files": other_files[:10], # Truncate long list for presentation
+        "total_files": total_files,
+        "total_size_bytes": total_size
+    }
