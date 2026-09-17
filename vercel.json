@@ -29,19 +29,7 @@
       "destination": "/api/index.py"
     },
     {
-      "source": "/book-converter",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/book-converter/(.*)",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/admin",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/admin/(.*)",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ],
