@@ -1,3 +1,4 @@
+import { handleUpload } from '@vercel/blob/client';
 import { issueSignedToken, presignUrl, parseStoreIdFromDelegationToken } from '@vercel/blob';
 
 // Auto-alias store-prefixed Vercel Blob environment variables if standard names are missing
@@ -43,6 +44,35 @@ export default async function handler(request, response) {
       body = request.body || {};
     }
 
+    // 1. Standard @vercel/blob/client handleUpload protocol
+    if (body && (body.type === 'blob.generate-client-token' || body.type === 'blob.upload-completed')) {
+      const jsonResponse = await handleUpload({
+        body,
+        request,
+        token: process.env.BLOB_READ_WRITE_TOKEN,
+        onBeforeGenerateToken: async (pathname) => {
+          return {
+            allowedContentTypes: [
+              'application/zip',
+              'application/x-zip-compressed',
+              'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+              'application/x-tex',
+              'text/plain',
+              'application/pdf',
+              'application/octet-stream'
+            ],
+            maximumSizeInBytes: 100 * 1024 * 1024,
+            tokenPayload: JSON.stringify({ pathname })
+          };
+        },
+        onUploadCompleted: async ({ blob }) => {
+          console.log('[BLOB_CLIENT_UPLOAD_COMPLETED]', blob.pathname);
+        }
+      });
+      return response.status(200).json(jsonResponse);
+    }
+
+    // 2. Custom presigned URL generation protocol
     const filename = body.filename || `manuscript_${Date.now()}.zip`;
     const size = body.size || 0;
     const cleanFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -50,13 +80,11 @@ export default async function handler(request, response) {
 
     console.log(`[UPLOAD_REQUESTED] filename: ${cleanFilename}, size: ${size}`);
 
-    // Command options for signed token API
     const commandOptions = {};
     if (process.env.BLOB_READ_WRITE_TOKEN) {
       commandOptions.token = process.env.BLOB_READ_WRITE_TOKEN;
     }
 
-    // 1. Issue signed token (scoped for 'put' and 'get' operations)
     const signedToken = await issueSignedToken({
       pathname,
       operations: ['put', 'get'],
@@ -82,7 +110,6 @@ export default async function handler(request, response) {
       console.warn('Could not parse storeId from delegation token:', e.message);
     }
 
-    // 2. Generate signed PUT URL for browser direct upload
     const { presignedUrl: uploadUrl } = await presignUrl(signedToken, {
       operation: 'put',
       pathname,
@@ -91,7 +118,6 @@ export default async function handler(request, response) {
       ...commandOptions,
     });
 
-    // 3. Generate signed GET URL for backend private retrieval
     const { presignedUrl: downloadUrl } = await presignUrl(signedToken, {
       operation: 'get',
       pathname,
