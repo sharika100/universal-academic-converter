@@ -24,6 +24,8 @@ export default async function handler(request, response) {
 
   const results = {
     timestamp: new Date().toISOString(),
+    git_commit_sha: process.env.VERCEL_GIT_COMMIT_SHA || 'unknown',
+    git_commit_msg: process.env.VERCEL_GIT_COMMIT_MESSAGE || 'unknown',
     sdk_version: "2.8.0",
     env_keys: Object.keys(process.env).filter(k => k.includes('BLOB') || k.includes('OIDC') || k.includes('VERCEL')),
     has_blob_token: !!process.env.BLOB_READ_WRITE_TOKEN,
