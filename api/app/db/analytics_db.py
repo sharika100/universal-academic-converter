@@ -334,6 +334,19 @@ def record_feedback(
     except Exception as e:
         logger.warning(f"[ANALYTICS_RECORD_FEEDBACK_ERROR] {e}")
 
+def row_to_dict(cursor, row) -> Dict[str, Any]:
+    """Safely converts DB-API cursor row (sqlite3.Row, RealDictRow, or pg8000 tuple/list) into a Python dictionary."""
+    if row is None:
+        return {}
+    if isinstance(row, dict):
+        return row
+    if hasattr(row, 'keys'):
+        return dict(row)
+    if cursor and cursor.description and isinstance(row, (tuple, list)):
+        col_names = [col[0] for col in cursor.description]
+        return dict(zip(col_names, row))
+    return {}
+
 def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
     """Queries and returns aggregated metrics, date filtering, and evidence-backed factual insights."""
     init_db()
@@ -353,28 +366,28 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
                 session_date_clause = f" WHERE last_active_at >= '{cutoff}'"
         
         cursor.execute(f"SELECT COUNT(*) as cnt FROM analytics_sessions{session_date_clause};")
-        row = cursor.fetchone()
-        total_sessions = dict(row)["cnt"] if row else 0
+        row = row_to_dict(cursor, cursor.fetchone())
+        total_sessions = row.get("cnt") or 0
         
         cursor.execute(f"SELECT COUNT(*) as cnt FROM analytics_sessions {session_date_clause + (' AND' if session_date_clause else 'WHERE')} (is_returning = 1 OR is_returning = true);")
-        row = cursor.fetchone()
-        returning_sessions = dict(row)["cnt"] if row else 0
+        row = row_to_dict(cursor, cursor.fetchone())
+        returning_sessions = row.get("cnt") or 0
         
         cursor.execute(f"SELECT COUNT(*) as cnt FROM analytics_events{date_clause} AND event_type = 'conversion_attempt';" if date_clause else "SELECT COUNT(*) as cnt FROM analytics_events WHERE event_type = 'conversion_attempt';")
-        row = cursor.fetchone()
-        total_conversion_attempts = dict(row)["cnt"] if row else 0
+        row = row_to_dict(cursor, cursor.fetchone())
+        total_conversion_attempts = row.get("cnt") or 0
         
         cursor.execute(f"SELECT COUNT(*) as cnt FROM analytics_events{date_clause} AND event_type = 'conversion_result' AND (status = 'SUCCESS' OR status = 'completed');" if date_clause else "SELECT COUNT(*) as cnt FROM analytics_events WHERE event_type = 'conversion_result' AND (status = 'SUCCESS' OR status = 'completed');")
-        row = cursor.fetchone()
-        successful_conversions = dict(row)["cnt"] if row else 0
+        row = row_to_dict(cursor, cursor.fetchone())
+        successful_conversions = row.get("cnt") or 0
 
         cursor.execute(f"SELECT COUNT(*) as cnt FROM analytics_events{date_clause} AND event_type = 'download_click';" if date_clause else "SELECT COUNT(*) as cnt FROM analytics_events WHERE event_type = 'download_click';")
-        row = cursor.fetchone()
-        total_downloads = dict(row)["cnt"] if row else 0
+        row = row_to_dict(cursor, cursor.fetchone())
+        total_downloads = row.get("cnt") or 0
         
         cursor.execute(f"SELECT COUNT(*) as cnt FROM analytics_errors{date_clause};" if date_clause else "SELECT COUNT(*) as cnt FROM analytics_errors;")
-        row = cursor.fetchone()
-        total_errors = dict(row)["cnt"] if row else 0
+        row = row_to_dict(cursor, cursor.fetchone())
+        total_errors = row.get("cnt") or 0
 
         # Strict Metric Rule: Return None if zero attempts (Do NOT return hardcoded 100%)
         success_rate_percent = round((successful_conversions / total_conversion_attempts) * 100.0, 1) if total_conversion_attempts > 0 else None
@@ -388,14 +401,14 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
         {date_clause if date_clause else 'WHERE 1=1'} AND event_type IN ('conversion_attempt', 'conversion_result')
         GROUP BY conversion_type;
         """)
-        wf_rows = [dict(r) for r in cursor.fetchall()]
+        wf_rows = [row_to_dict(cursor, r) for r in cursor.fetchall()]
         workflows = []
         for r in wf_rows:
-            att = r["attempts"] or 0
-            succ = r["success_cnt"] or 0
+            att = r.get("attempts") or 0
+            succ = r.get("success_cnt") or 0
             rate = round((succ / att) * 100.0, 1) if att > 0 else None
             workflows.append({
-                "conversion_type": r["wf"],
+                "conversion_type": r.get("wf") or "Standard Conversion",
                 "count": att,
                 "successful": succ,
                 "failed": att - succ,
@@ -411,13 +424,13 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
         {date_clause if date_clause else 'WHERE 1=1'} AND event_type IN ('conversion_attempt', 'conversion_result')
         GROUP BY destination_template;
         """)
-        tmpl_rows = [dict(r) for r in cursor.fetchall()]
+        tmpl_rows = [row_to_dict(cursor, r) for r in cursor.fetchall()]
         templates = []
         for r in tmpl_rows:
-            cnt = r["cnt"] or 0
+            cnt = r.get("cnt") or 0
             pct = round((cnt / total_conversion_attempts) * 100.0, 1) if total_conversion_attempts > 0 else 0.0
             templates.append({
-                "template_name": r["tmpl"],
+                "template_name": r.get("tmpl") or "Springer Journal",
                 "count": cnt,
                 "percentage": pct
             })
@@ -428,15 +441,18 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
         {date_clause if date_clause else 'WHERE 1=1'} AND event_type = 'conversion_result' AND total_time_ms > 0
         ORDER BY total_time_ms ASC;
         """)
-        times_rows = [dict(r) for r in cursor.fetchall()]
+        times_rows = [row_to_dict(cursor, r) for r in cursor.fetchall()]
         
         if times_rows:
-            total_times = [r["total_time_ms"] for r in times_rows]
-            avg_time_s = round((sum(total_times) / len(total_times)) / 1000.0, 2)
-            median_idx = len(total_times) // 2
-            median_time_s = round(total_times[median_idx] / 1000.0, 2)
-            p95_idx = int(len(total_times) * 0.95)
-            p95_time_s = round(total_times[min(p95_idx, len(total_times)-1)] / 1000.0, 2)
+            total_times = [r["total_time_ms"] for r in times_rows if r.get("total_time_ms")]
+            if total_times:
+                avg_time_s = round((sum(total_times) / len(total_times)) / 1000.0, 2)
+                median_idx = len(total_times) // 2
+                median_time_s = round(total_times[median_idx] / 1000.0, 2)
+                p95_idx = int(len(total_times) * 0.95)
+                p95_time_s = round(total_times[min(p95_idx, len(total_times)-1)] / 1000.0, 2)
+            else:
+                avg_time_s, median_time_s, p95_time_s = None, None, None
             
             upload_times = [r["upload_time_ms"] for r in times_rows if r.get("upload_time_ms")]
             avg_upload_s = round((sum(upload_times) / len(upload_times)) / 1000.0, 2) if upload_times else None
@@ -457,13 +473,13 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
         GROUP BY error_category
         ORDER BY cnt DESC;
         """)
-        err_rows = [dict(r) for r in cursor.fetchall()]
+        err_rows = [row_to_dict(cursor, r) for r in cursor.fetchall()]
         error_categories = []
         for r in err_rows:
-            cnt = r["cnt"] or 0
+            cnt = r.get("cnt") or 0
             pct = round((cnt / total_errors) * 100.0, 1) if total_errors > 0 else 0.0
             error_categories.append({
-                "category": r["error_category"],
+                "category": r.get("error_category") or "Unknown",
                 "count": cnt,
                 "percentage": pct
             })
@@ -477,7 +493,7 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
         FROM analytics_events
         {date_clause if date_clause else 'WHERE 1=1'} AND event_type = 'conversion_result';
         """)
-        q_row = dict(cursor.fetchone()) if cursor.rowcount != 0 else {}
+        q_row = row_to_dict(cursor, cursor.fetchone())
         val_pass = q_row.get("val_pass") or 0
         val_total = q_row.get("val_total") or 0
         comp_pass = q_row.get("comp_pass") or 0
@@ -505,7 +521,7 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
         FROM analytics_feedback
         {date_clause};
         """)
-        fb_row = dict(cursor.fetchone()) if cursor.rowcount != 0 else {}
+        fb_row = row_to_dict(cursor, cursor.fetchone())
         raw_avg = fb_row.get("avg_rating")
         tot_fb = fb_row.get("total_feedback") or 0
         use_cnt = fb_row.get("useful_cnt") or 0
@@ -521,7 +537,7 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
         ORDER BY feedback_id DESC
         LIMIT 10;
         """)
-        comments = [dict(c) for c in cursor.fetchall()]
+        comments = [row_to_dict(cursor, c) for c in cursor.fetchall()]
         
         user_feedback = {
             "average_rating": avg_rating,
