@@ -71,6 +71,28 @@ def get_blob_read_write_token() -> Optional[str]:
             return v
     return None
 
+def trigger_blob_cleanup(blob_url: Optional[str], pathname: Optional[str] = None):
+    """Triggers immediate deletion of the temporary processing Blob from Vercel Blob storage."""
+    if not blob_url and not pathname:
+        return
+    try:
+        host_url = os.environ.get("VERCEL_PROJECT_PRODUCTION_URL") or os.environ.get("VERCEL_URL")
+        if host_url:
+            if not host_url.startswith("http"):
+                host_url = f"https://{host_url}"
+            delete_endpoint = f"{host_url}/api/blob-delete"
+        else:
+            delete_endpoint = "http://127.0.0.1:3000/api/blob-delete"
+
+        requests.post(
+            delete_endpoint,
+            json={"url": blob_url, "pathname": pathname},
+            timeout=10
+        )
+        logger.info(f"[TEMPORARY_BLOB_DELETED] Triggered deletion for temporary Blob (pathname: '{pathname or blob_url}')")
+    except Exception as del_err:
+        logger.warning(f"[TEMPORARY_BLOB_CLEANUP_WARNING] Failed to trigger Blob deletion: {del_err}")
+
 @app.middleware("http")
 async def normalize_vercel_path(request, call_next):
     raw_path = request.scope.get("path", "")
@@ -396,6 +418,9 @@ async def analyze_source_from_storage(req: StorageAnalysisRequest):
             detail=str(e),
             ref_id=ref_id
         ))
+    finally:
+        # MANDATORY TEMPORARY BLOB CLEANUP: Delete temporary staging Blob immediately after retrieval (or on failure)
+        trigger_blob_cleanup(req.blob_url, req.pathname)
 
     if not content or len(content) == 0:
         return JSONResponse(status_code=400, content=create_error_payload(
@@ -664,6 +689,9 @@ async def analyze_template_from_storage(req: TemplateStorageAnalysisRequest):
             detail=str(e),
             ref_id=ref_id
         ))
+    finally:
+        # MANDATORY TEMPORARY BLOB CLEANUP: Delete temporary staging Blob immediately after retrieval (or on failure)
+        trigger_blob_cleanup(req.blob_url, req.pathname)
 
     if not content or len(content) == 0:
         return JSONResponse(status_code=400, content=create_error_payload(

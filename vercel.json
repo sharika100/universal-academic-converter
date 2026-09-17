@@ -24,6 +24,10 @@
       "use": "@vercel/node"
     },
     {
+      "src": "api/blob-delete.js",
+      "use": "@vercel/node"
+    },
+    {
       "src": "api/index.py",
       "use": "@vercel/python"
     }
@@ -40,6 +44,10 @@
     {
       "src": "/api/blob-download",
       "dest": "api/blob-download.js"
+    },
+    {
+      "src": "/api/blob-delete",
+      "dest": "api/blob-delete.js"
     },
     {
       "src": "/api/blob-test",
