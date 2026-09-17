@@ -73,5 +73,11 @@
       "src": "/(.*)",
       "dest": "frontend/$1"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/blob-delete?clean_abandoned=true",
+      "schedule": "0 * * * *"
+    }
   ]
 }

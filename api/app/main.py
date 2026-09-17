@@ -84,9 +84,16 @@ def trigger_blob_cleanup(blob_url: Optional[str], pathname: Optional[str] = None
         else:
             delete_endpoint = "http://127.0.0.1:3000/api/blob-delete"
 
+        token = get_blob_read_write_token()
+        headers = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+            headers["x-internal-delete-key"] = token[-16:]
+
         requests.post(
             delete_endpoint,
             json={"url": blob_url, "pathname": pathname},
+            headers=headers,
             timeout=10
         )
         logger.info(f"[TEMPORARY_BLOB_DELETED] Triggered deletion for temporary Blob (pathname: '{pathname or blob_url}')")
