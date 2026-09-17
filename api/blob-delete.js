@@ -38,9 +38,20 @@ function isUploadsNamespace(urlOrPathname) {
 export default async function handler(request, response) {
   ensureBlobEnv();
 
+  const authHeader = request.headers.authorization || request.headers['authorization'] || '';
+  const cronHeader = request.headers['x-vercel-cron'] || request.headers['X-Vercel-Cron'] || '';
+  const internalSecret = request.headers['x-internal-delete-key'] || request.headers['X-Internal-Delete-Key'] || '';
+
   // SECURITY CHECK: Verify caller authorization
   if (!isAuthorized(request)) {
-    return response.status(401).json({ error: 'Unauthorized cleanup request.' });
+    return response.status(401).json({
+      error: 'Unauthorized cleanup request.',
+      debug: {
+        has_auth_header: !!authHeader,
+        has_cron_header: !!cronHeader,
+        has_internal_secret: !!internalSecret
+      }
+    });
   }
 
   const options = { access: 'private' };
