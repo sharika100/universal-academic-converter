@@ -342,18 +342,21 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
         cursor = conn.cursor()
         
         date_clause = ""
+        session_date_clause = ""
         if days and days > 0:
             if db_type == "postgres":
-                date_clause = f" WHERE created_at >= NOW() - INTERVAL '{days} days'"
+                date_clause = f" WHERE created_at >= NOW() - INTERVAL '{days} day'"
+                session_date_clause = f" WHERE last_active_at >= NOW() - INTERVAL '{days} day'"
             else:
                 cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
                 date_clause = f" WHERE created_at >= '{cutoff}'"
+                session_date_clause = f" WHERE last_active_at >= '{cutoff}'"
         
-        cursor.execute("SELECT COUNT(*) as cnt FROM analytics_sessions;")
+        cursor.execute(f"SELECT COUNT(*) as cnt FROM analytics_sessions{session_date_clause};")
         row = cursor.fetchone()
         total_sessions = dict(row)["cnt"] if row else 0
         
-        cursor.execute("SELECT COUNT(*) as cnt FROM analytics_sessions WHERE is_returning = 1 OR is_returning = true;")
+        cursor.execute(f"SELECT COUNT(*) as cnt FROM analytics_sessions {session_date_clause + (' AND' if session_date_clause else 'WHERE')} (is_returning = 1 OR is_returning = true);")
         row = cursor.fetchone()
         returning_sessions = dict(row)["cnt"] if row else 0
         
@@ -373,7 +376,8 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
         row = cursor.fetchone()
         total_errors = dict(row)["cnt"] if row else 0
 
-        success_rate_percent = round((successful_conversions / max(1, total_conversion_attempts)) * 100.0, 1) if total_conversion_attempts > 0 else 100.0
+        # Strict Metric Rule: Return None if zero attempts (Do NOT return hardcoded 100%)
+        success_rate_percent = round((successful_conversions / total_conversion_attempts) * 100.0, 1) if total_conversion_attempts > 0 else None
         
         cursor.execute(f"""
         SELECT 
@@ -389,13 +393,13 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
         for r in wf_rows:
             att = r["attempts"] or 0
             succ = r["success_cnt"] or 0
-            rate = round((succ / max(1, att)) * 100.0, 1) if att > 0 else 0.0
+            rate = round((succ / att) * 100.0, 1) if att > 0 else None
             workflows.append({
                 "conversion_type": r["wf"],
                 "count": att,
                 "successful": succ,
                 "failed": att - succ,
-                "percentage": round((att / max(1, total_conversion_attempts)) * 100.0, 1) if total_conversion_attempts > 0 else 0.0,
+                "percentage": round((att / total_conversion_attempts) * 100.0, 1) if total_conversion_attempts > 0 else 0.0,
                 "success_rate": rate
             })
             
@@ -411,7 +415,7 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
         templates = []
         for r in tmpl_rows:
             cnt = r["cnt"] or 0
-            pct = round((cnt / max(1, total_conversion_attempts)) * 100.0, 1) if total_conversion_attempts > 0 else 0.0
+            pct = round((cnt / total_conversion_attempts) * 100.0, 1) if total_conversion_attempts > 0 else 0.0
             templates.append({
                 "template_name": r["tmpl"],
                 "count": cnt,
@@ -434,10 +438,10 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
             p95_idx = int(len(total_times) * 0.95)
             p95_time_s = round(total_times[min(p95_idx, len(total_times)-1)] / 1000.0, 2)
             
-            upload_times = [r["upload_time_ms"] for r in times_rows if r["upload_time_ms"]]
-            avg_upload_s = round((sum(upload_times) / len(upload_times)) / 1000.0, 2) if upload_times else 0.0
+            upload_times = [r["upload_time_ms"] for r in times_rows if r.get("upload_time_ms")]
+            avg_upload_s = round((sum(upload_times) / len(upload_times)) / 1000.0, 2) if upload_times else None
         else:
-            avg_time_s, median_time_s, p95_time_s, avg_upload_s = 0.0, 0.0, 0.0, 0.0
+            avg_time_s, median_time_s, p95_time_s, avg_upload_s = None, None, None, None
             
         performance = {
             "avg_processing_time_s": avg_time_s,
@@ -457,7 +461,7 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
         error_categories = []
         for r in err_rows:
             cnt = r["cnt"] or 0
-            pct = round((cnt / max(1, total_errors)) * 100.0, 1) if total_errors > 0 else 0.0
+            pct = round((cnt / total_errors) * 100.0, 1) if total_errors > 0 else 0.0
             error_categories.append({
                 "category": r["error_category"],
                 "count": cnt,
@@ -479,8 +483,9 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
         comp_pass = q_row.get("comp_pass") or 0
         comp_total = q_row.get("comp_total") or 0
         
-        val_rate = round((val_pass / max(1, val_total)) * 100.0, 1) if val_total > 0 else 100.0
-        comp_rate = round((comp_pass / max(1, comp_total)) * 100.0, 1) if comp_total > 0 else 100.0
+        # Strict Metric Rules: Return None when count is 0
+        val_rate = round((val_pass / val_total) * 100.0, 1) if val_total > 0 else None
+        comp_rate = round((comp_pass / comp_total) * 100.0, 1) if comp_total > 0 else None
         
         quality_indicators = {
             "validation_pass_rate": val_rate,
@@ -501,10 +506,13 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
         {date_clause};
         """)
         fb_row = dict(cursor.fetchone()) if cursor.rowcount != 0 else {}
-        avg_rating = round(fb_row.get("avg_rating") or 5.0, 1)
+        raw_avg = fb_row.get("avg_rating")
         tot_fb = fb_row.get("total_feedback") or 0
         use_cnt = fb_row.get("useful_cnt") or 0
-        useful_rate = round((use_cnt / max(1, tot_fb)) * 100.0, 1) if tot_fb > 0 else 100.0
+        
+        # Strict Metric Rules: Return None when no feedback responses
+        avg_rating = round(raw_avg, 1) if (tot_fb > 0 and raw_avg is not None) else None
+        useful_rate = round((use_cnt / tot_fb) * 100.0, 1) if tot_fb > 0 else None
         
         cursor.execute(f"""
         SELECT feedback_text, rating, is_useful, conversion_type, created_at
@@ -530,19 +538,23 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
         if templates:
             top_tmpl = max(templates, key=lambda x: x["count"])
             insights.append(f"Most popular target publisher template: {top_tmpl['template_name']} ({top_tmpl['count']} conversions)")
-        if performance["avg_processing_time_s"] > 0:
+        if performance["avg_processing_time_s"] is not None and performance["avg_processing_time_s"] > 0:
             insights.append(f"Average conversion duration: {performance['avg_processing_time_s']} seconds (P95: {performance['p95_processing_time_s']}s)")
         if total_conversion_attempts > 0:
             insights.append(f"Conversion success rate: {success_rate_percent}% across {total_conversion_attempts} conversion attempts")
         if error_categories:
             top_err = error_categories[0]
             insights.append(f"Most common error category: {top_err['category']} ({top_err['count']} occurrences)")
-        else:
+        elif total_conversion_attempts > 0:
             insights.append("Zero conversion errors recorded in telemetry window.")
+        else:
+            insights.append("Zero conversion telemetry data recorded in active window.")
 
         conn.close()
         
         return {
+            "db_connected": True,
+            "db_provider": "PostgreSQL" if db_type == "postgres" else "SQLite",
             "summary": {
                 "total_sessions": total_sessions,
                 "returning_sessions": returning_sessions,
@@ -564,13 +576,39 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
     except Exception as e:
         logger.warning(f"[ANALYTICS_GET_DASHBOARD_DATA_ERROR] {e}")
         return {
-            "summary": {"total_sessions": 0, "total_conversion_attempts": 0, "successful_conversions": 0, "failed_conversions": 0, "success_rate_percent": 100.0, "total_downloads": 0, "total_errors": 0},
+            "db_connected": False,
+            "db_provider": None,
+            "error": "Analytics database unavailable",
+            "summary": {
+                "total_sessions": 0,
+                "returning_sessions": 0,
+                "total_conversion_attempts": 0,
+                "successful_conversions": 0,
+                "failed_conversions": 0,
+                "success_rate_percent": None,
+                "total_downloads": 0,
+                "total_errors": 0
+            },
             "workflows": [],
             "templates": [],
-            "performance": {"avg_processing_time_s": 0.0, "median_processing_time_s": 0.0, "p95_processing_time_s": 0.0, "avg_upload_time_s": 0.0},
+            "performance": {
+                "avg_processing_time_s": None,
+                "median_processing_time_s": None,
+                "p95_processing_time_s": None,
+                "avg_upload_time_s": None
+            },
             "error_categories": [],
-            "quality_indicators": {"validation_pass_rate": 100.0, "compilation_pass_rate": 100.0, "overall_delivery_rate": 100.0},
-            "user_feedback": {"average_rating": 5.0, "total_responses": 0, "useful_percentage": 100.0, "recent_comments": []},
-            "insights": ["Zero telemetry data recorded."]
+            "quality_indicators": {
+                "validation_pass_rate": None,
+                "compilation_pass_rate": None,
+                "overall_delivery_rate": None
+            },
+            "user_feedback": {
+                "average_rating": None,
+                "total_responses": 0,
+                "useful_percentage": None,
+                "recent_comments": []
+            },
+            "insights": ["Analytics database unavailable"]
         }
 

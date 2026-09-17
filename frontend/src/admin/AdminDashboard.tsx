@@ -174,6 +174,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         </div>
 
+        {/* Database Availability Error State */}
+        {(data?.db_connected === false || data?.error === 'Analytics database unavailable') && (
+          <div className="admin-error-box" style={{ marginBottom: 24, background: 'rgba(239, 68, 68, 0.15)', borderColor: 'rgba(239, 68, 68, 0.4)', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <AlertTriangle style={{ width: 22, height: 22, color: '#EF4444', flexShrink: 0 }} />
+              <div>
+                <div style={{ fontWeight: 600, color: '#FCA5A5', fontSize: '0.9rem' }}>Analytics database unavailable</div>
+                <div style={{ fontSize: '0.8rem', color: '#CBD5E1', marginTop: 2 }}>
+                  The analytics database could not be reached. Verify PostgreSQL database credentials in production environment variables.
+                </div>
+              </div>
+            </div>
+            <button onClick={() => fetchMetrics(selectedDays)} style={{ background: 'none', border: 'none', color: '#FCA5A5', textDecoration: 'underline', cursor: 'pointer', fontWeight: 600, fontSize: '0.825rem' }}>
+              Retry Connection
+            </button>
+          </div>
+        )}
+
         {error && (
           <div className="admin-error-box" style={{ marginBottom: 24, justifyContent: 'space-between' }}>
             <span>{error}</span>
@@ -229,8 +247,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </div>
             <div className="admin-stat-row">
-              <span className="admin-stat-value">{summary.success_rate_percent ?? summary.success_rate ?? 100}%</span>
-              <span style={{ fontSize: '0.75rem', color: '#FCA5A5', fontWeight: 600 }}>{summary.failed_conversions ?? 0} failed</span>
+              <span className="admin-stat-value">
+                {summary.success_rate_percent !== null && summary.success_rate_percent !== undefined
+                  ? `${summary.success_rate_percent}%`
+                  : 'No data'}
+              </span>
+              <span style={{ fontSize: '0.75rem', color: summary.failed_conversions > 0 ? '#FCA5A5' : 'var(--text-dim)', fontWeight: 600 }}>
+                {summary.total_conversion_attempts > 0 ? `${summary.failed_conversions ?? 0} failed` : 'No data'}
+              </span>
             </div>
             <div className="admin-stat-sub">
               Returning Sessions: {summary.returning_sessions ?? 0}
@@ -247,14 +271,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
             <div className="admin-stat-row">
               <span className="admin-stat-value">
-                {performance.p95_processing_time_s ?? (performance.total_time?.p95 ? (performance.total_time.p95 / 1000).toFixed(1) : '0.0')}s
+                {performance.p95_processing_time_s !== null && performance.p95_processing_time_s !== undefined
+                  ? `${performance.p95_processing_time_s}s`
+                  : 'No data'}
               </span>
               <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                Avg: {performance.avg_processing_time_s ?? (performance.total_time?.avg ? (performance.total_time.avg / 1000).toFixed(1) : '0.0')}s
+                {performance.avg_processing_time_s !== null && performance.avg_processing_time_s !== undefined
+                  ? `Avg: ${performance.avg_processing_time_s}s`
+                  : 'No data'}
               </span>
             </div>
             <div className="admin-stat-sub">
-              Avg Upload Latency: {performance.avg_upload_time_s ?? 0.0}s
+              Avg Upload Latency: {performance.avg_upload_time_s !== null && performance.avg_upload_time_s !== undefined ? `${performance.avg_upload_time_s}s` : 'No data'}
             </div>
           </div>
 
@@ -268,14 +296,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
             <div className="admin-stat-row">
               <span className="admin-stat-value">
-                {feedbackSummary.average_rating ?? feedbackSummary.avg_rating ?? '5.0'} / 5
+                {feedbackSummary.average_rating !== null && feedbackSummary.average_rating !== undefined
+                  ? `${feedbackSummary.average_rating} / 5`
+                  : 'No feedback'}
               </span>
               <span style={{ fontSize: '0.75rem', color: '#FCD34D', fontWeight: 600 }}>
-                {feedbackSummary.useful_percentage ?? 100}% Useful
+                {feedbackSummary.useful_percentage !== null && feedbackSummary.useful_percentage !== undefined
+                  ? `${feedbackSummary.useful_percentage}% Useful`
+                  : 'No feedback'}
               </span>
             </div>
             <div className="admin-stat-sub">
-              Total Feedback Responses: {feedbackSummary.total_responses ?? feedbackSummary.total_ratings ?? 0}
+              Total Feedback Responses: {feedbackSummary.total_responses ?? 0}
             </div>
           </div>
         </div>
@@ -291,12 +323,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: 6 }}>
                 <span style={{ color: 'var(--text-muted)' }}>Structural Validation Pass Rate</span>
-                <span style={{ fontWeight: 600, color: '#10B981' }}>{quality.validation_pass_rate || 0}%</span>
+                <span style={{ fontWeight: 600, color: quality.validation_pass_rate !== null && quality.validation_pass_rate !== undefined ? '#10B981' : 'var(--text-dim)' }}>
+                  {quality.validation_pass_rate !== null && quality.validation_pass_rate !== undefined
+                    ? `${quality.validation_pass_rate}%`
+                    : 'No data'}
+                </span>
               </div>
               <div className="admin-progress-bg">
                 <div
                   className="admin-progress-fill"
-                  style={{ width: `${quality.validation_pass_rate || 0}%`, background: '#10B981' }}
+                  style={{ width: `${quality.validation_pass_rate ?? 0}%`, background: '#10B981' }}
                 ></div>
               </div>
               <p style={{ fontSize: '0.725rem', color: 'var(--text-dim)', marginTop: 6 }}>
@@ -307,12 +343,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: 6 }}>
                 <span style={{ color: 'var(--text-muted)' }}>LaTeX Sandbox Compilation Pass Rate</span>
-                <span style={{ fontWeight: 600, color: '#6366F1' }}>{quality.compilation_pass_rate || 0}%</span>
+                <span style={{ fontWeight: 600, color: quality.compilation_pass_rate !== null && quality.compilation_pass_rate !== undefined ? '#6366F1' : 'var(--text-dim)' }}>
+                  {quality.compilation_pass_rate !== null && quality.compilation_pass_rate !== undefined
+                    ? `${quality.compilation_pass_rate}%`
+                    : 'No data'}
+                </span>
               </div>
               <div className="admin-progress-bg">
                 <div
                   className="admin-progress-fill"
-                  style={{ width: `${quality.compilation_pass_rate || 0}%`, background: '#6366F1' }}
+                  style={{ width: `${quality.compilation_pass_rate ?? 0}%`, background: '#6366F1' }}
                 ></div>
               </div>
               <p style={{ fontSize: '0.725rem', color: 'var(--text-dim)', marginTop: 6 }}>

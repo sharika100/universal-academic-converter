@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Download, CheckCircle2, ShieldCheck, FileCheck, Terminal, Eye, ChevronDown, ChevronUp, AlertTriangle, CheckSquare, Square, Lock, Info, XCircle } from 'lucide-react';
+import { logAnalyticsEvent } from '../utils/analytics';
 
 interface ConversionReportData {
   job_id: string;
@@ -47,6 +48,14 @@ export const ReportView: React.FC<ReportViewProps> = ({ report, onOpenPdfModal }
   const [checkedItems, setCheckedItems] = useState<{ [key: string]: boolean }>({});
 
   const downloadUrl = (kind: string) => `/api/download/${report.job_id}/${kind}`;
+
+  const handleDownloadClick = () => {
+    logAnalyticsEvent({
+      event_type: 'download_click',
+      conversion_type: `${report.source_format} → ${report.destination_format}`,
+      destination_template: report.destination_format
+    });
+  };
 
   const toggleCheck = (id: string) => {
     setCheckedItems((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -135,11 +144,11 @@ export const ReportView: React.FC<ReportViewProps> = ({ report, onOpenPdfModal }
           </button>
 
           {report.destination_format === 'LATEX' ? (
-            <a href={downloadUrl('zip')} download className="btn-primary" style={{ textDecoration: 'none' }}>
+            <a href={downloadUrl('zip')} download onClick={handleDownloadClick} className="btn-primary" style={{ textDecoration: 'none' }}>
               <Download size={18} /> Download Converted LaTeX Project ZIP
             </a>
           ) : (
-            <a href={downloadUrl('docx')} download className="btn-primary" style={{ textDecoration: 'none' }}>
+            <a href={downloadUrl('docx')} download onClick={handleDownloadClick} className="btn-primary" style={{ textDecoration: 'none' }}>
               <Download size={18} /> Download Converted DOCX
             </a>
           )}

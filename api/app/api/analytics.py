@@ -72,50 +72,59 @@ def verify_admin_auth(request: Request, admin_session: Optional[str] = Cookie(No
         raise HTTPException(status_code=401, detail="Expired or invalid admin session token.")
 
 @router.post("/api/analytics/event")
-def log_analytics_event(req: EventRecordRequest, background_tasks: BackgroundTasks):
-    """Fire-and-forget public telemetry endpoint."""
-    background_tasks.add_task(analytics_db.record_session, req.session_id, req.is_returning or False, req.browser_family or "Unknown")
-    background_tasks.add_task(
-        analytics_db.record_event,
-        session_id=req.session_id,
-        event_type=req.event_type,
-        conversion_type=req.conversion_type,
-        destination_template=req.destination_template,
-        status=req.status,
-        upload_time_ms=req.upload_time_ms,
-        conversion_time_ms=req.conversion_time_ms,
-        download_time_ms=req.download_time_ms,
-        total_time_ms=req.total_time_ms,
-        validation_passed=req.validation_passed,
-        compilation_passed=req.compilation_passed
-    )
-    return {"status": "queued"}
+def log_analytics_event(req: EventRecordRequest):
+    """Synchronous public telemetry endpoint guaranteeing database insertion before Vercel process freeze."""
+    try:
+        analytics_db.record_session(req.session_id, req.is_returning or False, req.browser_family or "Unknown")
+        analytics_db.record_event(
+            session_id=req.session_id,
+            event_type=req.event_type,
+            conversion_type=req.conversion_type,
+            destination_template=req.destination_template,
+            status=req.status,
+            upload_time_ms=req.upload_time_ms,
+            conversion_time_ms=req.conversion_time_ms,
+            download_time_ms=req.download_time_ms,
+            total_time_ms=req.total_time_ms,
+            validation_passed=req.validation_passed,
+            compilation_passed=req.compilation_passed
+        )
+        return {"status": "recorded"}
+    except Exception as e:
+        logger.warning(f"[ANALYTICS_EVENT_LOG_ERROR] {e}")
+        return {"status": "error", "detail": str(e)}
 
 @router.post("/api/analytics/error")
-def log_analytics_error(req: ErrorRecordRequest, background_tasks: BackgroundTasks):
-    """Fire-and-forget public error logging endpoint."""
-    background_tasks.add_task(
-        analytics_db.record_error,
-        session_id=req.session_id,
-        error_category=req.error_category,
-        error_code=req.error_code,
-        conversion_type=req.conversion_type,
-        destination_template=req.destination_template
-    )
-    return {"status": "queued"}
+def log_analytics_error(req: ErrorRecordRequest):
+    """Synchronous error logging endpoint."""
+    try:
+        analytics_db.record_error(
+            session_id=req.session_id,
+            error_category=req.error_category,
+            error_code=req.error_code,
+            conversion_type=req.conversion_type,
+            destination_template=req.destination_template
+        )
+        return {"status": "recorded"}
+    except Exception as e:
+        logger.warning(f"[ANALYTICS_ERROR_LOG_ERROR] {e}")
+        return {"status": "error", "detail": str(e)}
 
 @router.post("/api/analytics/feedback")
-def log_analytics_feedback(req: FeedbackRecordRequest, background_tasks: BackgroundTasks):
-    """Voluntary user feedback logging endpoint."""
-    background_tasks.add_task(
-        analytics_db.record_feedback,
-        session_id=req.session_id,
-        rating=req.rating,
-        is_useful=req.is_useful,
-        feedback_text=req.feedback_text,
-        conversion_type=req.conversion_type
-    )
-    return {"status": "queued"}
+def log_analytics_feedback(req: FeedbackRecordRequest):
+    """Synchronous voluntary user feedback logging endpoint."""
+    try:
+        analytics_db.record_feedback(
+            session_id=req.session_id,
+            rating=req.rating,
+            is_useful=req.is_useful,
+            feedback_text=req.feedback_text,
+            conversion_type=req.conversion_type
+        )
+        return {"status": "recorded"}
+    except Exception as e:
+        logger.warning(f"[ANALYTICS_FEEDBACK_LOG_ERROR] {e}")
+        return {"status": "error", "detail": str(e)}
 
 @router.post("/api/admin/login")
 def admin_login(req: AdminLoginRequest, response: Response):
