@@ -12,20 +12,24 @@ function ensureBlobEnv() {
 }
 
 function isAuthorized(request) {
-  // 1. Allow Vercel Cron invocation (x-vercel-cron header or Bearer CRON_SECRET)
-  const cronHeader = request.headers['x-vercel-cron'] || request.headers['X-Vercel-Cron'];
-  if (cronHeader) return true;
-
   const authHeader = request.headers.authorization || request.headers['authorization'] || '';
-  if (process.env.CRON_SECRET && authHeader === `Bearer ${process.env.CRON_SECRET}`) return true;
+  const internalSecret = request.headers['x-internal-delete-key'] || request.headers['X-Internal-Delete-Key'] || '';
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+
+  // 1. Allow Vercel Cron invocation if CRON_SECRET matches
+  if (process.env.CRON_SECRET && authHeader === `Bearer ${process.env.CRON_SECRET}`) {
+    return true;
+  }
 
   // 2. Allow server-side internal calls with Blob token
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (token && authHeader && (authHeader.includes(token) || authHeader === `Bearer ${token}`)) return true;
+  if (token && authHeader && (authHeader.includes(token) || authHeader === `Bearer ${token}`)) {
+    return true;
+  }
 
-  // 3. Fallback check for internal backend requests
-  const internalSecret = request.headers['x-internal-delete-key'] || request.headers['X-Internal-Delete-Key'];
-  if (token && internalSecret && internalSecret === token.slice(-16)) return true;
+  // 3. Fallback check for internal backend requests with server token slice
+  if (token && internalSecret && internalSecret === token.slice(-16)) {
+    return true;
+  }
 
   return false;
 }
@@ -38,20 +42,9 @@ function isUploadsNamespace(urlOrPathname) {
 export default async function handler(request, response) {
   ensureBlobEnv();
 
-  const authHeader = request.headers.authorization || request.headers['authorization'] || '';
-  const cronHeader = request.headers['x-vercel-cron'] || request.headers['X-Vercel-Cron'] || '';
-  const internalSecret = request.headers['x-internal-delete-key'] || request.headers['X-Internal-Delete-Key'] || '';
-
   // SECURITY CHECK: Verify caller authorization
   if (!isAuthorized(request)) {
-    return response.status(401).json({
-      error: 'Unauthorized cleanup request.',
-      debug: {
-        has_auth_header: !!authHeader,
-        has_cron_header: !!cronHeader,
-        has_internal_secret: !!internalSecret
-      }
-    });
+    return response.status(401).json({ error: 'Unauthorized cleanup request.' });
   }
 
   const options = { access: 'private' };
