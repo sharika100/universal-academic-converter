@@ -12,7 +12,7 @@ from typing import Optional, Dict, Any
 from pydantic import BaseModel
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.models.udm import UniversalDocumentModel
@@ -149,7 +149,7 @@ INLINE_INDEX_HTML = """<!doctype html>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <script type="module" crossorigin src="/assets/index-By2ihgcc.js"></script>
+    <script type="module" crossorigin src="/assets/index-DfNcT7Xt.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-CuU9JyVg.css">
   </head>
   <body>
@@ -864,7 +864,49 @@ def execute_conversion_pipeline(job_id: str, udm: UniversalDocumentModel, spec: 
     report_path = os.path.join(output_dir, "report.json")
     with open(report_path, "w", encoding="utf-8") as fh:
         fh.write(report.model_dump_json())
-        
+
+    # Mandatory temporary storage staging for Vercel serverless download persistence:
+    token = get_blob_read_write_token()
+    if token:
+        try:
+            host_url = os.environ.get("VERCEL_PROJECT_PRODUCTION_URL") or os.environ.get("VERCEL_URL")
+            if host_url:
+                if not host_url.startswith("http"):
+                    host_url = f"https://{host_url}"
+                token_endpoint = f"{host_url}/api/upload-token"
+            else:
+                token_endpoint = "http://127.0.0.1:3000/api/upload-token"
+
+            files_to_stage = []
+            output_zip = os.path.join(output_dir, "converted_project.zip")
+            if os.path.exists(output_zip):
+                files_to_stage.append(("zip", output_zip, "application/zip"))
+            output_docx = os.path.join(output_dir, "converted_document.docx")
+            if os.path.exists(output_docx):
+                files_to_stage.append(("docx", output_docx, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+            output_pdf = os.path.join(output_dir, "preview.pdf")
+            if os.path.exists(output_pdf):
+                files_to_stage.append(("pdf", output_pdf, "application/pdf"))
+
+            for kind, fpath, ctype in files_to_stage:
+                target_pathname = f"uploads/out_{job_id}_{kind}.bin"
+                auth_resp = requests.post(
+                    token_endpoint,
+                    json={"filename": target_pathname, "contentType": ctype},
+                    timeout=10
+                )
+                if auth_resp.status_code == 200:
+                    auth_data = auth_resp.json()
+                    upload_url = auth_data.get("uploadUrl") or auth_data.get("presignedUrl")
+                    if upload_url:
+                        with open(fpath, "rb") as fh:
+                            fdata = fh.read()
+                        put_resp = requests.put(upload_url, data=fdata, headers={"Content-Type": ctype}, timeout=30)
+                        if put_resp.status_code == 200:
+                            logger.info(f"[{ref_id}] Staged conversion output '{kind}' to Blob storage ({target_pathname})")
+        except Exception as blob_stage_err:
+            logger.warning(f"[{ref_id}] Failed to stage conversion output to Blob storage: {blob_stage_err}")
+
     return {
         "status": "SUCCESS",
         "job_id": job_id,
@@ -1029,26 +1071,66 @@ async def convert_document_from_storage(req: ConversionStorageRequest):
 @app.get("/api/download/{job_id}/{file_kind}")
 @app.get("/download/{job_id}/{file_kind}")
 def download_file(job_id: str, file_kind: str):
+    ref_id = f"REF-{job_id[:8].upper()}"
     output_dir = os.path.join(TEMP_STORAGE, job_id, "output")
     
-    if file_kind == "zip":
-        p = os.path.join(output_dir, "converted_project.zip")
-        if os.path.exists(p):
-            return FileResponse(p, filename="converted_academic_paper.zip", media_type="application/zip")
-    elif file_kind == "docx":
-        p = os.path.join(output_dir, "converted_document.docx")
-        if os.path.exists(p):
-            return FileResponse(p, filename="converted_academic_paper.docx", media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-    elif file_kind == "pdf":
-        p = os.path.join(output_dir, "preview.pdf")
-        if os.path.exists(p):
-            return FileResponse(p, filename="manuscript_preview.pdf", media_type="application/pdf")
-    elif file_kind == "report":
-        p = os.path.join(output_dir, "report.json")
-        if os.path.exists(p):
-            return FileResponse(p, filename="conversion_report.json", media_type="application/json")
-            
-    raise HTTPException(status_code=404, detail="Requested download file not found.")
+    file_configs = {
+        "zip": ("converted_project.zip", "converted_academic_paper.zip", "application/zip", f"uploads/out_{job_id}_zip.bin"),
+        "docx": ("converted_document.docx", "converted_academic_paper.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", f"uploads/out_{job_id}_docx.bin"),
+        "pdf": ("preview.pdf", "manuscript_preview.pdf", "application/pdf", f"uploads/out_{job_id}_pdf.bin"),
+        "report": ("report.json", "conversion_report.json", "application/json", None),
+    }
+
+    if file_kind not in file_configs:
+        return JSONResponse(status_code=400, content=create_error_payload(
+            stage="download", error_code="INVALID_DOWNLOAD_TYPE",
+            message="Invalid download type requested.", detail=f"File kind '{file_kind}' is not supported.", ref_id=ref_id
+        ))
+
+    local_fname, download_name, media_type, target_pathname = file_configs[file_kind]
+    local_path = os.path.join(output_dir, local_fname)
+
+    # 1. Primary: Return from local /tmp if available on this instance
+    if os.path.exists(local_path):
+        return FileResponse(local_path, filename=download_name, media_type=media_type)
+
+    # 2. Serverless Fallback: Fetch from temporary Vercel Blob storage
+    if target_pathname:
+        try:
+            token = get_blob_read_write_token()
+            host_url = os.environ.get("VERCEL_PROJECT_PRODUCTION_URL") or os.environ.get("VERCEL_URL")
+            if host_url:
+                if not host_url.startswith("http"):
+                    host_url = f"https://{host_url}"
+                helper_url = f"{host_url}/api/blob-download?pathname={urllib.parse.quote(target_pathname, safe='')}"
+            else:
+                helper_url = f"http://127.0.0.1:3000/api/blob-download?pathname={urllib.parse.quote(target_pathname, safe='')}"
+
+            headers = {}
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+
+            logger.info(f"[{ref_id}] Attempting serverless fallback retrieval from Blob storage for download ({target_pathname})")
+            resp = requests.get(helper_url, headers=headers, timeout=30)
+            if resp.status_code == 200 and len(resp.content) > 0:
+                logger.info(f"[{ref_id}] Retrieved conversion output ({len(resp.content)} bytes) from Blob storage fallback")
+                # Trigger temporary blob cleanup after retrieval
+                trigger_blob_cleanup(None, target_pathname)
+                return Response(
+                    content=resp.content,
+                    media_type=media_type,
+                    headers={"Content-Disposition": f'attachment; filename="{download_name}"'}
+                )
+        except Exception as dl_err:
+            logger.warning(f"[{ref_id}] Serverless Blob download fallback failed: {dl_err}")
+
+    return JSONResponse(status_code=404, content=create_error_payload(
+        stage="download",
+        error_code="OUTPUT_FILE_EXPIRED",
+        message="Conversion output file could not be retrieved.",
+        detail="The temporary output file expired or was not found in storage. Please re-run the conversion.",
+        ref_id=ref_id
+    ))
 
 @app.get("/{catchall:path}")
 def serve_frontend(catchall: str):

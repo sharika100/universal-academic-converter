@@ -46,15 +46,48 @@ interface ReportViewProps {
 export const ReportView: React.FC<ReportViewProps> = ({ report, onOpenPdfModal }) => {
   const [showIntegrityCard, setShowIntegrityCard] = useState<boolean>(true);
   const [checkedItems, setCheckedItems] = useState<{ [key: string]: boolean }>({});
+  const [downloading, setDownloading] = useState<boolean>(false);
 
-  const downloadUrl = (kind: string) => `/api/download/${report.job_id}/${kind}`;
-
-  const handleDownloadClick = () => {
+  const handleDownloadClick = async (kind: string) => {
     logAnalyticsEvent({
       event_type: 'download_click',
       conversion_type: `${report.source_format} → ${report.destination_format}`,
       destination_template: report.destination_format
     });
+
+    setDownloading(true);
+    try {
+      const url = `/api/download/${report.job_id}/${kind}`;
+      const res = await fetch(url);
+      const contentType = res.headers.get('content-type') || '';
+
+      if (!res.ok || contentType.includes('application/json')) {
+        let errorMsg = 'Conversion output could not be downloaded. Please try the conversion again.';
+        if (contentType.includes('application/json')) {
+          try {
+            const errJson = await res.json();
+            errorMsg = errJson.message || errJson.detail || errorMsg;
+          } catch {}
+        }
+        alert(`Download Error: ${errorMsg}`);
+        return;
+      }
+
+      const blob = await res.blob();
+      const downloadUrlObj = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrlObj;
+      const defaultFilename = kind === 'zip' ? 'converted_academic_paper.zip' : (kind === 'docx' ? 'converted_academic_paper.docx' : 'manuscript_preview.pdf');
+      a.download = defaultFilename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(downloadUrlObj);
+    } catch (err: any) {
+      alert('Conversion output could not be downloaded. Please try the conversion again.');
+    } finally {
+      setDownloading(false);
+    }
   };
 
   const toggleCheck = (id: string) => {
@@ -144,13 +177,13 @@ export const ReportView: React.FC<ReportViewProps> = ({ report, onOpenPdfModal }
           </button>
 
           {report.destination_format === 'LATEX' ? (
-            <a href={downloadUrl('zip')} download onClick={handleDownloadClick} className="btn-primary" style={{ textDecoration: 'none' }}>
-              <Download size={18} /> Download Converted LaTeX Project ZIP
-            </a>
+            <button onClick={() => handleDownloadClick('zip')} disabled={downloading} className="btn-primary" style={{ border: 'none', cursor: downloading ? 'not-allowed' : 'pointer' }}>
+              <Download size={18} /> {downloading ? 'Downloading...' : 'Download Converted LaTeX Project ZIP'}
+            </button>
           ) : (
-            <a href={downloadUrl('docx')} download onClick={handleDownloadClick} className="btn-primary" style={{ textDecoration: 'none' }}>
-              <Download size={18} /> Download Converted DOCX
-            </a>
+            <button onClick={() => handleDownloadClick('docx')} disabled={downloading} className="btn-primary" style={{ border: 'none', cursor: downloading ? 'not-allowed' : 'pointer' }}>
+              <Download size={18} /> {downloading ? 'Downloading...' : 'Download Converted DOCX'}
+            </button>
           )}
         </div>
       </div>
