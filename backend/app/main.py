@@ -54,6 +54,13 @@ try:
 except Exception as analytics_err:
     logger.error(f"Failed to mount analytics router: {analytics_err}")
 
+try:
+    from app.api.book_api import router as book_router
+    app.include_router(book_router)
+    logger.info("Book converter router successfully mounted.")
+except Exception as book_err:
+    logger.error(f"Failed to mount book converter router: {book_err}")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

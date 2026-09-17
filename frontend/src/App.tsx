@@ -18,6 +18,7 @@ import { FeedbackCard } from './components/FeedbackCard';
 import { Footer } from './components/Footer';
 import { AdminLogin } from './admin/AdminLogin';
 import { AdminDashboard } from './admin/AdminDashboard';
+import { BookConverterPage } from './components/BookConverterPage';
 import { logAnalyticsEvent, logAnalyticsError } from './utils/analytics';
 import { Play, Search, Loader2, ShieldCheck, ShieldAlert } from 'lucide-react';
 
@@ -782,6 +783,10 @@ export const App: React.FC = () => {
   };
 
   const isConvertEnabled = !!sourceUdm && !!destSpec && !apiError && !analyzing && !converting && hasAcknowledged;
+
+  if (currentPath === '/book-converter') {
+    return <BookConverterPage />;
+  }
 
   if (currentPath === '/admin/analytics' || currentPath === '/admin/login' || currentPath === '/admin') {
     if (adminToken) {
