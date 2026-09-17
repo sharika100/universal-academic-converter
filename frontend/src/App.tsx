@@ -42,37 +42,7 @@ async function calculateSHA256(file: File): Promise<string> {
 }
 
 function getLightweightUdm(udm: any): any {
-  if (!udm) return null;
-  try {
-    const cleanUdm = JSON.parse(JSON.stringify(udm));
-    if (cleanUdm.sections) {
-      cleanUdm.sections.forEach((sec: any) => {
-        if (sec.blocks) {
-          sec.blocks.forEach((blk: any) => {
-            if (blk.image_data_b64) delete blk.image_data_b64;
-            if (blk.sub_images) {
-              blk.sub_images.forEach((sub: any) => {
-                if (sub.image_data_b64) delete sub.image_data_b64;
-              });
-            }
-          });
-        }
-      });
-    }
-    if (cleanUdm.figures) {
-      cleanUdm.figures.forEach((fig: any) => {
-        if (fig.image_data_b64) delete fig.image_data_b64;
-      });
-    }
-    if (cleanUdm.equations) {
-      cleanUdm.equations.forEach((eq: any) => {
-        if (eq.image_data_b64) delete eq.image_data_b64;
-      });
-    }
-    return cleanUdm;
-  } catch {
-    return udm;
-  }
+  return udm;
 }
 
 export const App: React.FC = () => {
