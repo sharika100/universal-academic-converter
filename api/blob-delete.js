@@ -16,18 +16,15 @@ function isAuthorized(request) {
   const internalSecret = request.headers['x-internal-delete-key'] || request.headers['X-Internal-Delete-Key'] || '';
   const token = process.env.BLOB_READ_WRITE_TOKEN;
 
-  // 1. Allow Vercel Cron invocation if CRON_SECRET matches
-  if (process.env.CRON_SECRET && authHeader === `Bearer ${process.env.CRON_SECRET}`) {
+  if (!token) return false;
+
+  // 1. Allow calls with server's private BLOB_READ_WRITE_TOKEN in Authorization header
+  if (authHeader && (authHeader.includes(token) || authHeader === `Bearer ${token}`)) {
     return true;
   }
 
-  // 2. Allow server-side internal calls with Blob token
-  if (token && authHeader && (authHeader.includes(token) || authHeader === `Bearer ${token}`)) {
-    return true;
-  }
-
-  // 3. Fallback check for internal backend requests with server token slice
-  if (token && internalSecret && internalSecret === token.slice(-16)) {
+  // 2. Allow calls with matching internal delete key header
+  if (internalSecret && internalSecret === token.slice(-16)) {
     return true;
   }
 
