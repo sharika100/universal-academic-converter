@@ -579,6 +579,7 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
             "db_connected": False,
             "db_provider": None,
             "error": "Analytics database unavailable",
+            "db_error_detail": str(e),
             "summary": {
                 "total_sessions": 0,
                 "returning_sessions": 0,
