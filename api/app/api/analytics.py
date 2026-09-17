@@ -119,8 +119,8 @@ def log_analytics_feedback(req: FeedbackRecordRequest, background_tasks: Backgro
 
 @router.post("/api/admin/login")
 def admin_login(req: AdminLoginRequest, response: Response):
-    """Admin login endpoint setting HTTP-only cookie and returning JWT token after verifying PBKDF2 database hash."""
-    is_valid = analytics_db.verify_admin_db_credentials(req.username, req.password)
+    """Single-admin login endpoint setting HTTP-only cookie and returning JWT token after verifying server-side environment variables."""
+    is_valid = analytics_db.verify_admin_credentials(req.username, req.password)
     if is_valid:
         token = jwt.encode({
             "username": req.username.strip(),

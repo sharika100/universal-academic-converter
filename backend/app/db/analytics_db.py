@@ -96,21 +96,13 @@ def get_db_connection():
     return conn, "sqlite"
 
 def init_db():
-    """Initializes analytics tables, indexes, and seeds default admin user if missing."""
+    """Initializes analytics tables and indexes (pure analytics data only, no user tables)."""
     try:
         conn, db_type = get_db_connection()
         cursor = conn.cursor()
         
         if db_type == "postgres":
             cursor.execute("""
-            CREATE TABLE IF NOT EXISTS admin_users (
-                id SERIAL PRIMARY KEY,
-                username VARCHAR(64) UNIQUE NOT NULL,
-                password_hash VARCHAR(255) NOT NULL,
-                salt VARCHAR(64) NOT NULL,
-                is_active BOOLEAN DEFAULT TRUE,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-            );
             CREATE TABLE IF NOT EXISTS analytics_sessions (
                 session_id VARCHAR(64) PRIMARY KEY,
                 started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -158,14 +150,6 @@ def init_db():
             """)
         else: # SQLite
             cursor.executescript("""
-            CREATE TABLE IF NOT EXISTS admin_users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                salt TEXT NOT NULL,
-                is_active INTEGER DEFAULT 1,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            );
             CREATE TABLE IF NOT EXISTS analytics_sessions (
                 session_id TEXT PRIMARY KEY,
                 started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -212,53 +196,21 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_errors_category ON analytics_errors(error_category);
             """)
         conn.commit()
-
-        # Check if admin_users is empty, seed initial credentials
-        cursor.execute("SELECT COUNT(*) as cnt FROM admin_users;")
-        row = cursor.fetchone()
-        admin_count = dict(row)["cnt"] if row else 0
-        if admin_count == 0:
-            env_user = os.environ.get("ADMIN_USERNAME", "admin")
-            env_pass = os.environ.get("ADMIN_PASSWORD", "admin123")
-            pwd_hash, salt = hash_password(env_pass)
-            if db_type == "postgres":
-                cursor.execute(
-                    "INSERT INTO admin_users (username, password_hash, salt) VALUES (%s, %s, %s);",
-                    (env_user, pwd_hash, salt)
-                )
-            else:
-                cursor.execute(
-                    "INSERT INTO admin_users (username, password_hash, salt) VALUES (?, ?, ?);",
-                    (env_user, pwd_hash, salt)
-                )
-            conn.commit()
-            logger.info(f"[ANALYTICS_DB] Initialized admin user '{env_user}' with PBKDF2 hashed password.")
-
         conn.close()
     except Exception as e:
         logger.warning(f"[ANALYTICS_DB_INIT_ERROR] {e}")
 
-def verify_admin_db_credentials(username: str, password: str) -> bool:
-    """Verifies credentials against stored PBKDF2 hash in admin_users table."""
-    init_db()
-    try:
-        conn, db_type = get_db_connection()
-        cursor = conn.cursor()
-        if db_type == "postgres":
-            cursor.execute("SELECT password_hash, salt FROM admin_users WHERE username = %s AND is_active = TRUE;", (username.strip(),))
-        else:
-            cursor.execute("SELECT password_hash, salt FROM admin_users WHERE username = ? AND is_active = 1;", (username.strip(),))
-        row = cursor.fetchone()
-        conn.close()
-        if not row:
-            return False
-        r = dict(row)
-        return verify_password(password.strip(), r["password_hash"], r["salt"])
-    except Exception as e:
-        logger.warning(f"[VERIFY_ADMIN_CREDENTIALS_ERROR] {e}")
-        env_user = os.environ.get("ADMIN_USERNAME", "admin")
-        env_pass = os.environ.get("ADMIN_PASSWORD", "admin123")
-        return username.strip() == env_user and password.strip() == env_pass
+def verify_admin_credentials(username: str, password: str) -> bool:
+    """Verifies single-admin credentials strictly against server-side environment variables."""
+    env_user = os.environ.get("ADMIN_USERNAME", "admin").strip()
+    env_pass = os.environ.get("ADMIN_PASSWORD", "admin123").strip()
+    
+    user_match = secrets.compare_digest(username.strip(), env_user)
+    pass_match = secrets.compare_digest(password.strip(), env_pass)
+    
+    return user_match and pass_match
+
+verify_admin_db_credentials = verify_admin_credentials
 
 def record_session(session_id: str, is_returning: bool = False, browser_family: str = "Unknown"):
     try:
