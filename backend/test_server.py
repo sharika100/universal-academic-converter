@@ -1,6 +1,11 @@
-import unittest
 import os
+import sys
 import shutil
+import unittest
+
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+sys.path.insert(0, os.path.abspath("api"))
+
 from app.models.udm import UniversalDocumentModel
 from app.models.template_spec import TemplateSpecification
 from app.parsers.docx_parser import DocxParser

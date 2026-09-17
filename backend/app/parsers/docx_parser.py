@@ -221,6 +221,9 @@ class DocxParser:
             heading_level = 1
             clean_title = text
             
+            is_bullet_symbol = bool(re.match(r'^[•\-\*\u2022\u2013\u2014]\s*', text))
+            is_all_bold = bool(p.runs) and any(r.text.strip() for r in p.runs) and all(r.bold for r in p.runs if r.text.strip())
+
             m_lvl1 = re.match(r'^(?:\d+|[IVXLCDM]+)\.\s+([A-Za-z].*)$', text)
             m_lvl2 = re.match(r'^[A-Z]\.\s+([A-Za-z].*)$', text)
             m_lvl3 = re.match(r'^\d+\.\d+\.\s+([A-Za-z].*)$', text)
@@ -237,7 +240,7 @@ class DocxParser:
                 is_heading = True
                 heading_level = 1
                 clean_title = m_lvl1.group(1).strip()
-            elif "heading 1" in style_name or text.endswith(":") and len(text) < 60:
+            elif "heading 1" in style_name:
                 is_heading = True
                 heading_level = 1
                 clean_title = text.rstrip(":").strip()
@@ -248,6 +251,10 @@ class DocxParser:
             elif "heading 3" in style_name:
                 is_heading = True
                 heading_level = 3
+                clean_title = text
+            elif ("heading" in style_name or (is_all_bold and len(text) < 85 and not is_bullet_symbol and not text.endswith(".") and not text.endswith(":"))):
+                is_heading = True
+                heading_level = 1
                 clean_title = text
                 
             if is_heading:
@@ -275,8 +282,8 @@ class DocxParser:
                 ))
                 return
                 
-            if "bullet" in style_name or "list" in style_name or text.startswith("•") or text.startswith("-"):
-                clean_item = text.lstrip("•- ").strip()
+            if not is_heading and ("bullet" in style_name or "list" in style_name or is_bullet_symbol):
+                clean_item = re.sub(r'^[•\-\*\u2022\u2013\u2014]\s*', '', text).strip()
                 if current_section.blocks and isinstance(current_section.blocks[-1], dict) and current_section.blocks[-1].get("type") == "list":
                     if "items" in current_section.blocks[-1] and isinstance(current_section.blocks[-1]["items"], list):
                         current_section.blocks[-1]["items"].append({"text": clean_item, "depth": 1})
@@ -518,6 +525,11 @@ class DocxParser:
             txt = (line_d.get("full_text", "") if isinstance(line_d, dict) else str(line_d)).strip()
             if not txt:
                 continue
+                
+            # Strip field-label prefixes like "Name of Author:", "Author Name:", "Author:", "By:"
+            field_label_match = re.match(r'^(?:name\s+of\s+author|author\s+name|authors?|by|submitted\s+by|written\s+by)\s*:\s*(.+)$', txt, re.I)
+            if field_label_match:
+                txt = field_label_match.group(1).strip()
                 
             txt_lower = txt.lower()
             if any(kw in txt_lower for kw in ["university", "institute", "college", "department", "school", "coimbatore", "tamil nadu", "professor", "lecturer", "scholar", "designation", "phone"]):
