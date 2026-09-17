@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "npm --prefix frontend install && npm --prefix frontend run build && node scripts/copy_build.js"
+    "build": "npm --prefix frontend install --include=dev && npm --prefix frontend run build && node scripts/copy_build.js"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.0"
