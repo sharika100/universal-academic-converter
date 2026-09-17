@@ -1,50 +1,48 @@
 {
-  "routes": [
+  "rewrites": [
     {
-      "handle": "filesystem"
+      "source": "/api/upload-token(.*)",
+      "destination": "/api/upload-token.js"
     },
     {
-      "src": "/api/upload-token(.*)",
-      "dest": "/api/upload-token.js"
+      "source": "/api/blob-upload-token(.*)",
+      "destination": "/api/upload-token.js"
     },
     {
-      "src": "/api/blob-upload-token(.*)",
-      "dest": "/api/upload-token.js"
+      "source": "/api/blob-download(.*)",
+      "destination": "/api/blob-download.js"
     },
     {
-      "src": "/api/blob-download(.*)",
-      "dest": "/api/blob-download.js"
+      "source": "/api/blob-delete(.*)",
+      "destination": "/api/blob-delete.js"
     },
     {
-      "src": "/api/blob-delete(.*)",
-      "dest": "/api/blob-delete.js"
+      "source": "/api/blob-test(.*)",
+      "destination": "/api/blob-test.js"
     },
     {
-      "src": "/api/blob-test(.*)",
-      "dest": "/api/blob-test.js"
+      "source": "/api/blob-diag(.*)",
+      "destination": "/api/blob-diag.js"
     },
     {
-      "src": "/api/blob-diag(.*)",
-      "dest": "/api/blob-diag.js"
+      "source": "/api/(.*)",
+      "destination": "/api/index.py"
     },
     {
-      "src": "/api/(.*)",
-      "dest": "/api/index.py"
+      "source": "/book-converter",
+      "destination": "/index.html"
     },
     {
-      "src": "/(.*)",
-      "dest": "/index.html"
-    }
-  ],
-  "headers": [
+      "source": "/book-converter/(.*)",
+      "destination": "/index.html"
+    },
     {
-      "source": "/assets/:path*",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "public, max-age=31536000, immutable"
-        }
-      ]
+      "source": "/admin",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/admin/(.*)",
+      "destination": "/index.html"
     }
   ],
   "crons": [
