@@ -41,6 +41,40 @@ async function calculateSHA256(file: File): Promise<string> {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+function getLightweightUdm(udm: any): any {
+  if (!udm) return null;
+  try {
+    const cleanUdm = JSON.parse(JSON.stringify(udm));
+    if (cleanUdm.sections) {
+      cleanUdm.sections.forEach((sec: any) => {
+        if (sec.blocks) {
+          sec.blocks.forEach((blk: any) => {
+            if (blk.image_data_b64) delete blk.image_data_b64;
+            if (blk.sub_images) {
+              blk.sub_images.forEach((sub: any) => {
+                if (sub.image_data_b64) delete sub.image_data_b64;
+              });
+            }
+          });
+        }
+      });
+    }
+    if (cleanUdm.figures) {
+      cleanUdm.figures.forEach((fig: any) => {
+        if (fig.image_data_b64) delete fig.image_data_b64;
+      });
+    }
+    if (cleanUdm.equations) {
+      cleanUdm.equations.forEach((eq: any) => {
+        if (eq.image_data_b64) delete eq.image_data_b64;
+      });
+    }
+    return cleanUdm;
+  } catch {
+    return udm;
+  }
+}
+
 export const App: React.FC = () => {
   const [presets, setPresets] = useState<any[]>([]);
   const [selectedPreset, setSelectedPreset] = useState<any | null>(null);
@@ -592,7 +626,8 @@ export const App: React.FC = () => {
         const formData = new FormData();
         formData.append('job_id', jobId);
         if (sourceUdm) {
-          formData.append('udm_json_str', JSON.stringify(sourceUdm));
+          const lightUdm = getLightweightUdm(sourceUdm);
+          formData.append('udm_json_str', JSON.stringify(lightUdm));
         }
         if (destSpec) {
           formData.append('spec_json_str', JSON.stringify(destSpec));
@@ -600,7 +635,47 @@ export const App: React.FC = () => {
 
         const res = await fetch('/api/convert', { method: 'POST', body: formData });
         setHttpStatus(res.status);
-        const json = await res.json();
+
+        let json: any = null;
+        const contentType = res.headers.get('content-type') || '';
+
+        if (!res.ok) {
+          let errorText = '';
+          if (contentType.includes('application/json')) {
+            try {
+              json = await res.json();
+            } catch {
+              // JSON parse fallback
+            }
+          }
+          if (!json || (!json.error_code && !json.message)) {
+            errorText = await res.text().catch(() => '');
+            const errCode = res.status === 413 ? 'PAYLOAD_TOO_LARGE' : (res.status === 404 ? 'ENDPOINT_NOT_FOUND' : 'COMPILATION_ERROR');
+            json = {
+              stage: 'conversion',
+              error_code: errCode,
+              message: res.status === 413
+                ? 'Conversion request payload exceeded function limit.'
+                : `Server returned HTTP ${res.status} error during conversion.`,
+              detail: errorText.slice(0, 200) || res.statusText,
+              reference_id: `REF-CONV-${Date.now().toString(36).toUpperCase()}`
+            };
+          }
+        } else {
+          try {
+            json = await res.json();
+          } catch (jsonErr: any) {
+            const rawText = await res.text().catch(() => '');
+            json = {
+              status: 'FAILURE',
+              stage: 'conversion',
+              error_code: 'INVALID_JSON_RESPONSE',
+              message: 'Server returned an invalid JSON response during conversion.',
+              detail: rawText.slice(0, 200) || String(jsonErr),
+              reference_id: `REF-CONV-JSON-${Date.now().toString(36).toUpperCase()}`
+            };
+          }
+        }
 
         clearInterval(interval);
         setProgressStep(PROGRESS_STEPS.length - 1);

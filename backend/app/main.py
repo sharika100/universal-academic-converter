@@ -782,10 +782,10 @@ async def convert_document(
     udm_json_path = os.path.join(job_dir, "udm.json")
     spec_json_path = os.path.join(job_dir, "spec.json")
     
-    if udm_json_str:
+    if not os.path.exists(udm_json_path) and udm_json_str:
         with open(udm_json_path, "w", encoding="utf-8") as fh:
             fh.write(udm_json_str)
-    if spec_json_str:
+    if not os.path.exists(spec_json_path) and spec_json_str:
         with open(spec_json_path, "w", encoding="utf-8") as fh:
             fh.write(spec_json_str)
             

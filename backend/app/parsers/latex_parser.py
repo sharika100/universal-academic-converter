@@ -307,7 +307,10 @@ class LatexParser:
             chunks = []
             if matches[0].start() > 0:
                 pre_text = content[:matches[0].start()].strip()
-                # Clean pre_text of document metadata macros/environments and comments
+                # Clean pre_text of document class, preamble macros, and document environments
+                pre_text = re.sub(r'\\documentclass\b.*?(?=\n|\Z)', '', pre_text)
+                pre_text = re.sub(r'\\usepackage\b.*?(?=\n|\Z)', '', pre_text)
+                pre_text = re.sub(r'\\(?:begin|end)\{document\}', '', pre_text)
                 pre_clean = re.sub(r'\\begin\{(?:abstract|keywords|highlights|graphicalabstract|frontmatter)\}.*?\\end\{(?:abstract|keywords|highlights|graphicalabstract|frontmatter)\}', '', pre_text, flags=re.DOTALL)
                 pre_clean = re.sub(r'\\(?:title|author|affiliation|address|institute|keywords|maketitle|shorttitle|shortauthors|cormark|ead|cortext|fnmark|fntext|tnotetext|tnoteref|fnref|corref|thanks)\b.*?(?=\n\n|\n\\|\Z)', '', pre_clean, flags=re.DOTALL)
                 pre_clean = re.sub(r'\\(?:let|def)\\[a-zA-Z]+\b.*$', '', pre_clean, flags=re.MULTILINE)
