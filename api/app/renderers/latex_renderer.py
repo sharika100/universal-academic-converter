@@ -71,18 +71,24 @@ class LatexRenderer:
         with open(bib_path, "w", encoding="utf-8") as fh:
             if udm.references:
                 for ref in udm.references:
-                    if hasattr(ref, 'raw_bibtex') and ref.raw_bibtex and len(ref.raw_bibtex) > 10:
-                        fh.write(ref.raw_bibtex.strip() + "\n\n")
+                    raw = getattr(ref, 'raw_bibtex', '') or ''
+                    if raw.strip().startswith('@'):
+                        fh.write(raw.strip() + "\n\n")
                     else:
-                        fh.write(f"@article{{{ref.cite_key},\n")
-                        if ref.title:
-                            fh.write(f"  title = {{{ref.title}}},\n")
-                        if ref.authors:
-                            fh.write(f"  author = {{{' and '.join(ref.authors)}}},\n")
-                        if ref.journal:
-                            fh.write(f"  journal = {{{ref.journal}}},\n")
-                        if ref.year:
-                            fh.write(f"  year = {{{ref.year}}},\n")
+                        title = getattr(ref, 'title', '') or 'Untitled'
+                        authors = getattr(ref, 'authors', []) or []
+                        year = getattr(ref, 'year', '') or ''
+                        journal = getattr(ref, 'journal', '') or ''
+                        cite_key = getattr(ref, 'cite_key', '') or getattr(ref, 'id', 'ref')
+                        
+                        fh.write(f"@article{{{cite_key},\n")
+                        fh.write(f"  title = {{{title}}},\n")
+                        if authors:
+                            fh.write(f"  author = {{{' and '.join(authors)}}},\n")
+                        if journal:
+                            fh.write(f"  journal = {{{journal}}},\n")
+                        if year:
+                            fh.write(f"  year = {{{year}}},\n")
                         fh.write("}\n\n")
             else:
                 fh.write("% Empty references\n")

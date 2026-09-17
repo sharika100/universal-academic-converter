@@ -18,6 +18,8 @@ from app.models.udm import (
     Section, Paragraph, ListBlock, ListItem, Equation, Figure, Table, TableCell,
     Reference, LabelValue, FieldItem, SignatureBlock, Annexure
 )
+from app.parsers.reference_parser import ReferenceParser
+from app.parsers.citation_matcher import CitationMatcher
 
 class DocxParser:
     @staticmethod
@@ -29,6 +31,7 @@ class DocxParser:
             
         udm = UniversalDocumentModel(source_format="DOCX")
         warnings = []
+        used_cite_keys = set()
         
         # 0. Document Type Classification
         doc_type = DocxParser.detect_document_type(doc)
@@ -273,13 +276,8 @@ class DocxParser:
                 return
                 
             if references_found:
-                ref_id = f"ref_{len(udm.references)+1}"
-                udm.references.append(Reference(
-                    id=ref_id,
-                    cite_key=ref_id,
-                    title=text,
-                    raw_bibtex=text
-                ))
+                parsed_ref = ReferenceParser.parse_reference_line(text, len(udm.references)+1, used_cite_keys)
+                udm.references.append(parsed_ref)
                 return
                 
             if not is_heading and ("bullet" in style_name or "list" in style_name or is_bullet_symbol):
@@ -393,6 +391,14 @@ class DocxParser:
             
         udm.sections = sections if sections else [Section(title="Main Content", level=1, blocks=[Paragraph(text="Content extracted").model_dump()])]
         
+        # Post-process paragraph blocks with CitationMatcher if references exist
+        if udm.references:
+            for sec in udm.sections:
+                for block in sec.blocks:
+                    if isinstance(block, dict) and block.get("type") == "paragraph" and "text" in block:
+                        updated_txt, _ = CitationMatcher.process_paragraph_text(block["text"], udm.references)
+                        block["text"] = updated_txt
+                        
         return udm
 
     @staticmethod
