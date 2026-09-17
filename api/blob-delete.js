@@ -12,19 +12,17 @@ function ensureBlobEnv() {
 }
 
 function isAuthorized(request) {
-  const authHeader = request.headers.authorization || request.headers['authorization'] || '';
+  const cronHeader = request.headers['x-vercel-cron'] || request.headers['X-Vercel-Cron'];
   const internalSecret = request.headers['x-internal-delete-key'] || request.headers['X-Internal-Delete-Key'] || '';
   const token = process.env.BLOB_READ_WRITE_TOKEN;
 
-  if (!token) return false;
-
-  // 1. Allow calls with server's private BLOB_READ_WRITE_TOKEN in Authorization header
-  if (authHeader && (authHeader.includes(token) || authHeader === `Bearer ${token}`)) {
+  // 1. Allow Vercel Cron invocation
+  if (cronHeader) {
     return true;
   }
 
-  // 2. Allow calls with matching internal delete key header
-  if (internalSecret && internalSecret === token.slice(-16)) {
+  // 2. Allow server-side internal calls with matching internal secret token slice
+  if (token && internalSecret && internalSecret === token.slice(-16)) {
     return true;
   }
 
@@ -39,7 +37,7 @@ function isUploadsNamespace(urlOrPathname) {
 export default async function handler(request, response) {
   ensureBlobEnv();
 
-  // SECURITY CHECK: Verify caller authorization
+  // SECURITY CHECK: Verify caller authorization (must originate from internal backend or Vercel Cron)
   if (!isAuthorized(request)) {
     return response.status(401).json({ error: 'Unauthorized cleanup request.' });
   }
