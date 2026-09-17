@@ -21,6 +21,19 @@ from app.models.udm import (
 from app.parsers.reference_parser import ReferenceParser
 from app.parsers.citation_matcher import CitationMatcher
 
+def is_reference_section_heading(title: str) -> bool:
+    if not title:
+        return False
+    clean = re.sub(r'^(?:\d+(?:\.\d+)*|[IVXLCDM]+|[A-Z])[\.\:\s]+', '', title, flags=re.I).strip().lower()
+    if clean in ["references", "reference", "bibliography", "works cited", "literature cited", "references cited", "bibliographic references"]:
+        return True
+    ref_word_match = re.search(r'\b(references?|bibliography|bibliographies|works cited|literature cited)\b', clean, re.I)
+    if not ref_word_match:
+        return False
+    if any(w in clean for w in ["framework", "architecture", "dataset", "model", "impl", "code", "implementation", "design"]):
+        return False
+    return True
+
 class DocxParser:
     @staticmethod
     def parse(docx_path: str) -> UniversalDocumentModel:
@@ -261,9 +274,15 @@ class DocxParser:
                 clean_title = text
                 
             if is_heading:
-                if clean_title.lower() in ["references", "bibliography"]:
+                if is_reference_section_heading(clean_title):
                     references_found = True
+                    if current_section and current_section.blocks:
+                        sections.append(current_section)
+                        current_section = Section(title="", level=1, blocks=[])
                     return
+                if references_found and not is_reference_section_heading(clean_title):
+                    references_found = False
+
                 if not first_heading_found:
                     first_heading_found = True
                     if not current_section.blocks or current_section.title.lower() in ["introduction", "main content"]:
@@ -390,7 +409,21 @@ class DocxParser:
             sections.append(current_section)
             
         udm.sections = sections if sections else [Section(title="Main Content", level=1, blocks=[Paragraph(text="Content extracted").model_dump()])]
-        
+
+        # Post-processing sweep: Ensure no reference section remains in udm.sections
+        clean_sections = []
+        for sec in udm.sections:
+            if is_reference_section_heading(sec.title):
+                for blk in sec.blocks:
+                    if isinstance(blk, dict) and blk.get("type") == "paragraph":
+                        p_txt = blk.get("text", "").strip()
+                        if p_txt:
+                            parsed_ref = ReferenceParser.parse_reference_line(p_txt, len(udm.references)+1, used_cite_keys)
+                            udm.references.append(parsed_ref)
+            else:
+                clean_sections.append(sec)
+        udm.sections = clean_sections if clean_sections else [Section(title="Main Content", level=1, blocks=[Paragraph(text="Content extracted").model_dump()])]
+
         # Post-process paragraph blocks with CitationMatcher if references exist
         if udm.references:
             for sec in udm.sections:

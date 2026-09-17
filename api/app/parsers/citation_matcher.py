@@ -60,7 +60,6 @@ class CitationMatcher:
         def replace_paren(match):
             author_part = match.group(1).strip()
             year_part = match.group(2).strip()
-            # Extract primary surname
             primary_surname = re.split(r'\s+et\s+al|\s+and|\s*,', author_part)[0].strip()
             matched_ref = CitationMatcher.match_references(primary_surname, year_part, references)
             if matched_ref:
@@ -87,5 +86,35 @@ class CitationMatcher:
             return match.group(0)
 
         updated_text = prose_pattern.sub(replace_prose, updated_text)
+
+        # 3. Numbered Citations: [1], [1, 2], [1-3]
+        num_pattern = re.compile(r'\[(\d+(?:\s*[\,\-\–\—]\s*\d+)*)\]')
+
+        def replace_num(match):
+            content = match.group(1)
+            nums = []
+            for part in re.split(r'[,]', content):
+                part = part.strip()
+                m_range = re.match(r'^(\d+)\s*[\-\–\—]\s*(\d+)$', part)
+                if m_range:
+                    start_i, end_i = int(m_range.group(1)), int(m_range.group(2))
+                    if start_i <= end_i:
+                        nums.extend(range(start_i, end_i + 1))
+                elif part.isdigit():
+                    nums.append(int(part))
+                    
+            keys = []
+            for n in nums:
+                if 1 <= n <= len(references):
+                    keys.append(references[n-1].cite_key)
+                    matched_keys.append(references[n-1].cite_key)
+                else:
+                    return match.group(0)
+                    
+            if keys:
+                return '\\cite{' + ','.join(keys) + '}'
+            return match.group(0)
+
+        updated_text = num_pattern.sub(replace_num, updated_text)
 
         return updated_text, matched_keys

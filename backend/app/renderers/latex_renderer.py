@@ -6,6 +6,7 @@ import zipfile
 from typing import List, Dict, Any
 from app.models.udm import UniversalDocumentModel
 from app.models.template_spec import TemplateSpecification
+from app.parsers.docx_parser import is_reference_section_heading
 
 class LatexRenderer:
     @staticmethod
@@ -300,6 +301,9 @@ class LatexRenderer:
             
         # Sections
         for sec in udm.sections:
+            if is_reference_section_heading(sec.title):
+                continue
+
             if is_book:
                 cmd = "\\chapter" if sec.level == 1 else ("\\section" if sec.level == 2 else ("\\subsection" if sec.level == 3 else "\\subsubsection"))
             else:
