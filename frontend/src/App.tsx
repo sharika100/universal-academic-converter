@@ -575,8 +575,6 @@ export const App: React.FC = () => {
 
       setConverting(true);
       setApiError(null);
-      setProgressStep(0);
-
       const conversionTypeStr = `${sourceFormat} → ${destFormat}`;
       const startTime = Date.now();
 
@@ -588,64 +586,139 @@ export const App: React.FC = () => {
       });
 
       const interval = setInterval(() => {
+
         setProgressStep((prev) => (prev < PROGRESS_STEPS.length - 1 ? prev + 1 : prev));
       }, 450);
 
       try {
-        setActiveEndpoint('/api/convert');
-        const formData = new FormData();
-        formData.append('job_id', jobId);
-        if (sourceUdm) {
-          const lightUdm = getLightweightUdm(sourceUdm);
-          formData.append('udm_json_str', JSON.stringify(lightUdm));
-        }
-        if (destSpec) {
-          formData.append('spec_json_str', JSON.stringify(destSpec));
+        const payloadObject = {
+          job_id: jobId,
+          udm: sourceUdm,
+          spec: destSpec
+        };
+
+
+        const serializedPayload = JSON.stringify(payloadObject);
+        const payloadByteSize = new TextEncoder().encode(serializedPayload).length;
+        const SIZE_THRESHOLD_BYTES = 3 * 1024 * 1024; // 3 MB threshold
+
+        let res: Response;
+
+        if (payloadByteSize <= SIZE_THRESHOLD_BYTES) {
+          setActiveEndpoint('/api/convert');
+          const formData = new FormData();
+          formData.append('job_id', jobId);
+          if (sourceUdm) {
+            formData.append('udm_json_str', JSON.stringify(sourceUdm));
+          }
+          if (destSpec) {
+            formData.append('spec_json_str', JSON.stringify(destSpec));
+          }
+          res = await fetch('/api/convert', { method: 'POST', body: formData });
+        } else {
+          setActiveEndpoint('/api/convert-from-storage');
+          console.log(`[CONVERSION_STORAGE_FALLBACK] Conversion payload size is ${payloadByteSize} bytes (> 3 MB). Staging temporary conversion state via Vercel Blob...`);
+
+          // 1. Get presigned upload token for conversion state
+          const tokenRes = await fetch('/api/upload-token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              filename: `conversion_state_${jobId}.json`,
+              contentType: 'application/json',
+              size: payloadByteSize
+            })
+          });
+
+          if (!tokenRes.ok) {
+            const errText = await tokenRes.text().catch(() => '');
+            throw new Error(`Failed to authorize storage for conversion state (HTTP ${tokenRes.status}): ${errText.slice(0, 100)}`);
+          }
+          const authData = await tokenRes.json();
+
+          // 2. Upload conversion_state.json directly to Vercel Blob
+          const stateBlob = new Blob([serializedPayload], { type: 'application/json' });
+          const putRes = await fetch(authData.uploadUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: stateBlob
+          });
+
+          if (!putRes.ok) {
+            const errText = await putRes.text().catch(() => '');
+            throw new Error(`Failed to upload conversion state to storage (HTTP ${putRes.status}): ${errText.slice(0, 100)}`);
+          }
+          const putData = await putRes.json();
+
+          // 3. Post lightweight reference to /api/convert-from-storage
+          res = await fetch('/api/convert-from-storage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              job_id: jobId,
+              blob_url: putData.url || authData.blobUrl,
+              download_url: authData.downloadUrl,
+              pathname: putData.pathname || authData.pathname,
+              filename: `conversion_state_${jobId}.json`
+            })
+          });
         }
 
-        const res = await fetch('/api/convert', { method: 'POST', body: formData });
         setHttpStatus(res.status);
 
         let json: any = null;
         const contentType = res.headers.get('content-type') || '';
 
         if (!res.ok) {
-          let errorText = '';
           if (contentType.includes('application/json')) {
             try {
               json = await res.json();
             } catch {
-              // JSON parse fallback
+              // fallback
             }
           }
           if (!json || (!json.error_code && !json.message)) {
-            errorText = await res.text().catch(() => '');
-            const errCode = res.status === 413 ? 'PAYLOAD_TOO_LARGE' : (res.status === 404 ? 'ENDPOINT_NOT_FOUND' : 'COMPILATION_ERROR');
+            const rawText = await res.text().catch(() => '');
+            const errCode = res.status === 413 ? 'PAYLOAD_TOO_LARGE' : (res.status === 404 ? 'ENDPOINT_NOT_FOUND' : 'CONVERSION_ERROR');
             json = {
+              status: 'FAILURE',
               stage: 'conversion',
               error_code: errCode,
               message: res.status === 413
-                ? 'Conversion request payload exceeded function limit.'
+                ? 'Conversion request payload exceeded function limit. Processing using temporary storage.'
                 : `Server returned HTTP ${res.status} error during conversion.`,
-              detail: errorText.slice(0, 200) || res.statusText,
+              detail: rawText.slice(0, 250) || res.statusText,
               reference_id: `REF-CONV-${Date.now().toString(36).toUpperCase()}`
             };
           }
         } else {
-          try {
-            json = await res.json();
-          } catch (jsonErr: any) {
+          if (contentType.includes('application/json')) {
+            try {
+              json = await res.json();
+            } catch (jsonErr: any) {
+              const rawText = await res.text().catch(() => '');
+              json = {
+                status: 'FAILURE',
+                stage: 'conversion',
+                error_code: 'INVALID_JSON_RESPONSE',
+                message: 'Server returned non-JSON response during conversion.',
+                detail: rawText.slice(0, 250) || String(jsonErr),
+                reference_id: `REF-CONV-JSON-${Date.now().toString(36).toUpperCase()}`
+              };
+            }
+          } else {
             const rawText = await res.text().catch(() => '');
             json = {
               status: 'FAILURE',
               stage: 'conversion',
-              error_code: 'INVALID_JSON_RESPONSE',
-              message: 'Server returned an invalid JSON response during conversion.',
-              detail: rawText.slice(0, 200) || String(jsonErr),
-              reference_id: `REF-CONV-JSON-${Date.now().toString(36).toUpperCase()}`
+              error_code: 'NON_JSON_RESPONSE',
+              message: 'Server returned non-JSON response during conversion.',
+              detail: rawText.slice(0, 250),
+              reference_id: `REF-CONV-TXT-${Date.now().toString(36).toUpperCase()}`
             };
           }
         }
+
 
         clearInterval(interval);
         setProgressStep(PROGRESS_STEPS.length - 1);

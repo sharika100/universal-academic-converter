@@ -176,6 +176,15 @@ class TemplateStorageAnalysisRequest(BaseModel):
     filename: Optional[str] = None
     sha256: Optional[str] = None
 
+class ConversionStorageRequest(BaseModel):
+    job_id: str
+    blob_url: str
+    download_url: Optional[str] = None
+    pathname: Optional[str] = None
+    filename: Optional[str] = None
+    sha256: Optional[str] = None
+
+
 @app.get("/api/health")
 @app.get("/health")
 def health_check():
@@ -769,50 +778,7 @@ async def analyze_template_from_storage(req: TemplateStorageAnalysisRequest):
         "spec": spec.model_dump()
     }
 
-@app.post("/api/convert")
-@app.post("/convert")
-async def convert_document(
-    job_id: str = Form(...),
-    udm_json_str: Optional[str] = Form(None),
-    spec_json_str: Optional[str] = Form(None)
-):
-    ref_id = f"REF-{job_id[:8].upper()}"
-    job_dir = os.path.join(TEMP_STORAGE, job_id)
-    os.makedirs(job_dir, exist_ok=True)
-    
-    udm_json_path = os.path.join(job_dir, "udm.json")
-    spec_json_path = os.path.join(job_dir, "spec.json")
-    
-    if udm_json_str:
-        with open(udm_json_path, "w", encoding="utf-8") as fh:
-            fh.write(udm_json_str)
-    if spec_json_str:
-        with open(spec_json_path, "w", encoding="utf-8") as fh:
-            fh.write(spec_json_str)
-            
-    if not os.path.exists(udm_json_path) or not os.path.exists(spec_json_path):
-        return JSONResponse(status_code=400, content=create_error_payload(
-            stage="conversion",
-            error_code="STORAGE_ERROR",
-            message="Missing source UDM or template specification for this conversion job.",
-            detail="The session data was not found on this serverless instance. Please re-run analysis.",
-            ref_id=ref_id
-        ))
-        
-    try:
-        with open(udm_json_path, "r", encoding="utf-8") as fh:
-            udm = UniversalDocumentModel.model_validate_json(fh.read())
-        with open(spec_json_path, "r", encoding="utf-8") as fh:
-            spec = TemplateSpecification.model_validate_json(fh.read())
-    except Exception as e:
-        return JSONResponse(status_code=400, content=create_error_payload(
-            stage="conversion",
-            error_code="CONVERSION_ERROR",
-            message="Failed to deserialize session conversion models.",
-            detail=str(e),
-            ref_id=ref_id
-        ))
-        
+def execute_conversion_pipeline(job_id: str, udm: UniversalDocumentModel, spec: TemplateSpecification, ref_id: str, job_dir: str):
     logger.info(f"[{ref_id}] Executing Format Conversion: {udm.source_format} → {spec.format_type.upper()}")
     mapping_res = MappingEngine.map_and_evaluate(udm, spec)
     
@@ -904,6 +870,159 @@ async def convert_document(
         "report": report.model_dump(),
         "mapping": mapping_res
     }
+
+@app.post("/api/convert")
+@app.post("/convert")
+async def convert_document(
+    job_id: str = Form(...),
+    udm_json_str: Optional[str] = Form(None),
+    spec_json_str: Optional[str] = Form(None)
+):
+    ref_id = f"REF-{job_id[:8].upper()}"
+    job_dir = os.path.join(TEMP_STORAGE, job_id)
+    os.makedirs(job_dir, exist_ok=True)
+    
+    udm_json_path = os.path.join(job_dir, "udm.json")
+    spec_json_path = os.path.join(job_dir, "spec.json")
+    
+    if udm_json_str:
+        with open(udm_json_path, "w", encoding="utf-8") as fh:
+            fh.write(udm_json_str)
+    if spec_json_str:
+        with open(spec_json_path, "w", encoding="utf-8") as fh:
+            fh.write(spec_json_str)
+            
+    if not os.path.exists(udm_json_path) or not os.path.exists(spec_json_path):
+        return JSONResponse(status_code=400, content=create_error_payload(
+            stage="conversion",
+            error_code="STORAGE_ERROR",
+            message="Missing source UDM or template specification for this conversion job.",
+            detail="The session data was not found on this serverless instance. Please re-run analysis.",
+            ref_id=ref_id
+        ))
+        
+    try:
+        with open(udm_json_path, "r", encoding="utf-8") as fh:
+            udm = UniversalDocumentModel.model_validate_json(fh.read())
+        with open(spec_json_path, "r", encoding="utf-8") as fh:
+            spec = TemplateSpecification.model_validate_json(fh.read())
+    except Exception as e:
+        return JSONResponse(status_code=400, content=create_error_payload(
+            stage="conversion",
+            error_code="CONVERSION_ERROR",
+            message="Failed to deserialize session conversion models.",
+            detail=str(e),
+            ref_id=ref_id
+        ))
+
+    return execute_conversion_pipeline(job_id=job_id, udm=udm, spec=spec, ref_id=ref_id, job_dir=job_dir)
+
+@app.post("/api/convert-from-storage")
+@app.post("/convert-from-storage")
+async def convert_document_from_storage(req: ConversionStorageRequest):
+    job_id = req.job_id
+    ref_id = f"REF-{job_id[:8].upper()}"
+    job_dir = os.path.join(TEMP_STORAGE, job_id)
+    os.makedirs(job_dir, exist_ok=True)
+    
+    url_lower = req.blob_url.lower()
+    is_valid_url = url_lower.startswith("https://") or url_lower.startswith("http://127.0.0.1") or url_lower.startswith("http://localhost") or os.path.exists(req.blob_url)
+    if not is_valid_url:
+        return JSONResponse(status_code=400, content=create_error_payload(
+            stage="conversion",
+            error_code="STORAGE_SECURITY_ERROR",
+            message="Invalid or untrusted storage URL requested for conversion.",
+            detail="Storage URL must originate from a secure HTTPS or Vercel Blob endpoint.",
+            ref_id=ref_id
+        ))
+
+    content = None
+    try:
+        if os.path.exists(req.blob_url):
+            with open(req.blob_url, "rb") as fh:
+                content = fh.read()
+        else:
+            headers = {}
+            token = get_blob_read_write_token()
+            if token and not req.download_url:
+                headers["Authorization"] = f"Bearer {token}"
+            
+            fetch_url = req.download_url if req.download_url else req.blob_url
+            logger.info(f"[{ref_id}] [BLOB_RETRIEVAL_ATTEMPTED] Fetching temporary conversion state from storage (pathname: '{req.pathname or 'conversion_state.json'}')")
+            
+            resp = requests.get(fetch_url, headers=headers, timeout=60)
+            if resp.status_code in (401, 403, 404):
+                try:
+                    host_url = os.environ.get("VERCEL_PROJECT_PRODUCTION_URL") or os.environ.get("VERCEL_URL")
+                    if host_url:
+                        if not host_url.startswith("http"):
+                            host_url = f"https://{host_url}"
+                        helper_url = f"{host_url}/api/blob-download?url={urllib.parse.quote(req.blob_url, safe='')}"
+                    else:
+                        helper_url = f"http://127.0.0.1:3000/api/blob-download?url={urllib.parse.quote(req.blob_url, safe='')}"
+                    
+                    resp_helper = requests.get(helper_url, timeout=60)
+                    if resp_helper.status_code == 200 and len(resp_helper.content) > 0:
+                        resp = resp_helper
+                except Exception as helper_err:
+                    logger.warning(f"[{ref_id}] Node Blob helper request failed for conversion state: {helper_err}")
+            
+            if resp.status_code != 200:
+                return JSONResponse(status_code=400, content=create_error_payload(
+                    stage="conversion",
+                    error_code="STORAGE_OBJECT_NOT_FOUND",
+                    message="Temporary conversion state payload could not be retrieved from secure storage.",
+                    detail=f"Storage request returned status code {resp.status_code}.",
+                    ref_id=ref_id
+                ))
+            content = resp.content
+    except Exception as e:
+        return JSONResponse(status_code=400, content=create_error_payload(
+            stage="conversion",
+            error_code="CONVERSION_ERROR",
+            message="Failed to download conversion state from Blob storage.",
+            detail=str(e),
+            ref_id=ref_id
+        ))
+    finally:
+        # Mandatory cleanup: delete temporary conversion state Blob post-processing
+        trigger_blob_cleanup(req.blob_url, req.pathname)
+
+    if not content or len(content) == 0:
+        return JSONResponse(status_code=400, content=create_error_payload(
+            stage="conversion",
+            error_code="CONVERSION_ERROR",
+            message="Retrieved temporary conversion state file is empty (0 bytes).",
+            detail="The temporary conversion state payload was empty.",
+            ref_id=ref_id
+        ))
+
+    import json as _json
+    try:
+        state_data = _json.loads(content.decode("utf-8"))
+        udm_dict = state_data.get("udm")
+        spec_dict = state_data.get("spec")
+        
+        udm = UniversalDocumentModel.model_validate(udm_dict)
+        spec = TemplateSpecification.model_validate(spec_dict)
+    except Exception as parse_err:
+        return JSONResponse(status_code=400, content=create_error_payload(
+            stage="conversion",
+            error_code="CONVERSION_ERROR",
+            message="Failed to parse temporary conversion state payload.",
+            detail=str(parse_err),
+            ref_id=ref_id
+        ))
+
+    udm_json_path = os.path.join(job_dir, "udm.json")
+    spec_json_path = os.path.join(job_dir, "spec.json")
+    with open(udm_json_path, "w", encoding="utf-8") as fh:
+        fh.write(udm.model_dump_json())
+    with open(spec_json_path, "w", encoding="utf-8") as fh:
+        fh.write(spec.model_dump_json())
+
+    return execute_conversion_pipeline(job_id=job_id, udm=udm, spec=spec, ref_id=ref_id, job_dir=job_dir)
+
 
 @app.get("/api/download/{job_id}/{file_kind}")
 @app.get("/download/{job_id}/{file_kind}")
