@@ -1,37 +1,4 @@
 {
-  "builds": [
-    {
-      "src": "frontend/package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "dist"
-      }
-    },
-    {
-      "src": "api/upload-token.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "api/blob-download.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "api/blob-test.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "api/blob-diag.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "api/blob-delete.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "api/index.py",
-      "use": "@vercel/python"
-    }
-  ],
   "routes": [
     {
       "src": "/api/upload-token(.*)",
@@ -81,3 +48,4 @@
     }
   ]
 }
+
