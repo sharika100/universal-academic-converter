@@ -28,3 +28,4 @@ test_extract_dest/
 .DS_Store
 *.log
 *.db
+scratch/

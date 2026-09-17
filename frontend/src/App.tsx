@@ -10,6 +10,8 @@ import { PdfPreviewModal } from './components/PdfPreviewModal';
 import { StructureModal } from './components/StructureModal';
 import { EntrypointSelectModal } from './components/EntrypointSelectModal';
 import { ResponsibleUseModal } from './components/ResponsibleUseModal';
+import { DocxOptimizationModal } from './components/DocxOptimizationModal';
+import { optimizeDocxImages } from './utils/docxOptimizer';
 import { ErrorPanel, APIErrorState } from './components/ErrorPanel';
 import { DebugPanel } from './components/DebugPanel';
 import { FeedbackCard } from './components/FeedbackCard';
@@ -72,6 +74,12 @@ export const App: React.FC = () => {
   const [possibleEntrypoints, setPossibleEntrypoints] = useState<string[]>([]);
   const [selectedEntrypoint, setSelectedEntrypoint] = useState<string>('');
   const [showEntrypointModal, setShowEntrypointModal] = useState<boolean>(false);
+
+  const [showOptimizationModal, setShowOptimizationModal] = useState<boolean>(false);
+  const [isOptimizingDocx, setIsOptimizingDocx] = useState<boolean>(false);
+  const [optimizationProgress, setOptimizationProgress] = useState<{ percent: number; statusText: string }>({ percent: 0, statusText: '' });
+  const [pendingFileForOptimization, setPendingFileForOptimization] = useState<File | null>(null);
+  const [optimizationChoiceMade, setOptimizationChoiceMade] = useState<boolean>(false);
 
   const [apiError, setApiError] = useState<APIErrorState | null>(null);
   const [activeEndpoint, setActiveEndpoint] = useState<string>('/api/analyze-source');
@@ -151,8 +159,51 @@ export const App: React.FC = () => {
     return "Analyze Source & Destination";
   };
 
-  const handleAnalyze = async (overrideEntrypoint?: string) => {
-    if (!sourceFile || !destFile) {
+  const handleConfirmOptimize = async () => {
+    const targetFile = pendingFileForOptimization || sourceFile;
+    if (!targetFile) return;
+
+    setIsOptimizingDocx(true);
+    setOptimizationProgress({ percent: 5, statusText: 'Initializing document optimizer...' });
+
+    try {
+      const result = await optimizeDocxImages(targetFile, {
+        onProgress: (percent, statusText) => {
+          setOptimizationProgress({ percent, statusText });
+        }
+      });
+
+      setSourceFile(result.file);
+      setOptimizationChoiceMade(true);
+      setShowOptimizationModal(false);
+      setIsOptimizingDocx(false);
+
+      // Trigger analysis with optimized file
+      handleAnalyze(undefined, result.file);
+    } catch (err: any) {
+      console.error("Optimization failed, proceeding with original file:", err);
+      setIsOptimizingDocx(false);
+      setShowOptimizationModal(false);
+      setOptimizationChoiceMade(true);
+      handleAnalyze(undefined, targetFile);
+    }
+  };
+
+  const handleProceedOriginal = () => {
+    setOptimizationChoiceMade(true);
+    setShowOptimizationModal(false);
+    handleAnalyze(undefined, pendingFileForOptimization || sourceFile || undefined);
+  };
+
+  const handleCancelOptimization = () => {
+    setShowOptimizationModal(false);
+    setIsOptimizingDocx(false);
+  };
+
+  const handleAnalyze = async (overrideEntrypoint?: string, overrideSourceFile?: File) => {
+    const activeSourceFile = overrideSourceFile || sourceFile;
+
+    if (!activeSourceFile || !destFile) {
       setApiError({
         stage: 'source_analysis',
         error_code: 'MISSING_FILE',
@@ -160,6 +211,17 @@ export const App: React.FC = () => {
         reference_id: 'REF-MISSING-INPUT',
         detail: 'Both source and destination files are required for document analysis.'
       });
+      return;
+    }
+
+    // Option B: Intercept large DOCX files (> 50 MB) for user-selectable optimization
+    if (
+      activeSourceFile.name.toLowerCase().endsWith('.docx') &&
+      activeSourceFile.size > 50 * 1024 * 1024 &&
+      !optimizationChoiceMade
+    ) {
+      setPendingFileForOptimization(activeSourceFile);
+      setShowOptimizationModal(true);
       return;
     }
 
@@ -171,10 +233,10 @@ export const App: React.FC = () => {
       let srcRes: Response;
 
       // 1. Analyze Source
-      if (sourceFile.size > LARGE_FILE_THRESHOLD) {
-        console.log(`Source file size (${(sourceFile.size / 1024 / 1024).toFixed(2)} MB) exceeds 3.5 MB threshold. Uploading directly to Private Vercel Blob Storage...`);
+      if (activeSourceFile.size > LARGE_FILE_THRESHOLD) {
+        console.log(`Source file size (${(activeSourceFile.size / 1024 / 1024).toFixed(2)} MB) exceeds 3.5 MB threshold. Uploading directly to Private Vercel Blob Storage...`);
         try {
-          const srcHash = await calculateSHA256(sourceFile);
+          const srcHash = await calculateSHA256(activeSourceFile);
           let finalBlobUrl = '';
           let finalPathname = '';
           let downloadUrl = '';
@@ -182,10 +244,10 @@ export const App: React.FC = () => {
           // Primary: Official @vercel/blob/client upload() SDK method
           try {
             console.log("Attempting direct upload via @vercel/blob/client upload() SDK...");
-            const blob = await upload(sourceFile.name, sourceFile, {
+            const blob = await upload(activeSourceFile.name, activeSourceFile, {
               access: 'private',
               handleUploadUrl: '/api/upload-token',
-              contentType: sourceFile.type || 'application/octet-stream'
+              contentType: activeSourceFile.type || 'application/octet-stream'
             });
             finalBlobUrl = blob.url;
             finalPathname = blob.pathname;
@@ -199,8 +261,8 @@ export const App: React.FC = () => {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                filename: sourceFile.name,
-                contentType: sourceFile.type || 'application/octet-stream'
+                filename: activeSourceFile.name,
+                contentType: activeSourceFile.type || 'application/octet-stream'
               })
             });
 
@@ -218,7 +280,7 @@ export const App: React.FC = () => {
               console.log("Directly uploading source manuscript payload to Vercel Blob signed URL...");
               const putRes = await fetch(authData.uploadUrl, {
                 method: 'PUT',
-                body: sourceFile
+                body: activeSourceFile
               });
 
               if (!putRes.ok) {
@@ -247,7 +309,7 @@ export const App: React.FC = () => {
               blob_url: finalBlobUrl,
               download_url: downloadUrl,
               pathname: finalPathname,
-              filename: sourceFile.name,
+              filename: activeSourceFile.name,
               sha256: srcHash,
               selected_entrypoint: overrideEntrypoint || selectedEntrypoint,
               source_type: 'latex_project'
@@ -268,7 +330,7 @@ export const App: React.FC = () => {
       } else {
         setActiveEndpoint('/api/analyze-source');
         const srcData = new FormData();
-        srcData.append('file', sourceFile);
+        srcData.append('file', activeSourceFile);
         if (overrideEntrypoint || selectedEntrypoint) {
           srcData.append('selected_entrypoint', overrideEntrypoint || selectedEntrypoint);
         }
@@ -283,12 +345,12 @@ export const App: React.FC = () => {
           errorData = await srcRes.json();
         } catch {
           const text = await srcRes.text().catch(() => '');
-          const defaultErrCode = sourceFile.name.toLowerCase().endsWith('.docx') ? 'DOCX_PARSE_ERROR' : 'LATEX_PROJECT_ANALYSIS_ERROR';
+          const defaultErrCode = activeSourceFile.name.toLowerCase().endsWith('.docx') ? 'DOCX_PARSE_ERROR' : 'LATEX_PROJECT_ANALYSIS_ERROR';
           errorData = {
             stage: 'source_analysis',
             error_code: srcRes.status === 413 ? 'LATEX_PROJECT_UPLOAD_ERROR' : (srcRes.status === 404 ? 'ENDPOINT_NOT_FOUND' : defaultErrCode),
             message: srcRes.status === 413
-              ? `Source project upload failed: file size (${(sourceFile.size / 1024 / 1024).toFixed(2)} MB) exceeded function limit.`
+              ? `Source project upload failed: file size (${(activeSourceFile.size / 1024 / 1024).toFixed(2)} MB) exceeded function limit.`
               : (srcRes.status === 404
                 ? 'Source analysis endpoint (/api/analyze-source) was not found on the server.'
                 : `Server returned HTTP ${srcRes.status} error during source analysis.`),
@@ -886,6 +948,17 @@ export const App: React.FC = () => {
           onClose={() => setShowEntrypointModal(false)}
         />
       )}
+
+      {/* DOCX Image Optimization Modal (Option B) */}
+      <DocxOptimizationModal
+        isOpen={showOptimizationModal}
+        file={pendingFileForOptimization || sourceFile}
+        onConfirmOptimize={handleConfirmOptimize}
+        onProceedOriginal={handleProceedOriginal}
+        onCancel={handleCancelOptimization}
+        isOptimizing={isOptimizingDocx}
+        optimizationProgress={optimizationProgress}
+      />
 
       {/* Developer Diagnostic Debug Panel */}
       <DebugPanel
