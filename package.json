@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "npm --prefix frontend install && npm --prefix frontend run build && node -e \"const fs=require('fs'); fs.cpSync('frontend/dist', '.', {recursive: true}); fs.cpSync('frontend/dist', 'api/app/static', {recursive: true});\""
+    "build": "node -e \"console.log('Deploying static build')\""
   },
   "dependencies": {
     "@vercel/blob": "^2.8.0"
