@@ -32,16 +32,31 @@ def verify_password(password: str, stored_hash: str, salt: str) -> bool:
     return secrets.compare_digest(computed_hash, stored_hash)
 
 def get_db_connection():
-    """Returns a database connection (PostgreSQL if DATABASE_URL set, otherwise SQLite)."""
+    """Returns a database connection (PostgreSQL via pure-Python pg8000 if DATABASE_URL set, otherwise SQLite)."""
     if DATABASE_URL and (DATABASE_URL.startswith("postgres://") or DATABASE_URL.startswith("postgresql://")):
         try:
-            import psycopg2
-            import psycopg2.extras
+            import pg8000.dbapi
+            import urllib.parse
             pg_url = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-            conn = psycopg2.connect(pg_url, cursor_factory=psycopg2.extras.RealDictCursor)
+            parsed = urllib.parse.urlparse(pg_url)
+            conn = pg8000.dbapi.connect(
+                user=parsed.username or "postgres",
+                password=parsed.password or "",
+                host=parsed.hostname or "localhost",
+                port=parsed.port or 5432,
+                database=parsed.path.lstrip('/') or "postgres",
+                ssl_context=True
+            )
             return conn, "postgres"
-        except Exception as e:
-            logger.warning(f"[ANALYTICS_DB] PostgreSQL connection failed, falling back to SQLite: {e}")
+        except Exception as e_pg:
+            try:
+                import psycopg2
+                import psycopg2.extras
+                pg_url = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+                conn = psycopg2.connect(pg_url, cursor_factory=psycopg2.extras.RealDictCursor)
+                return conn, "postgres"
+            except Exception as e_ps:
+                logger.warning(f"[ANALYTICS_DB] PostgreSQL connection failed (pg8000: {e_pg}, psycopg2: {e_ps}), falling back to SQLite")
             
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -576,7 +591,3 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
             "insights": ["Zero telemetry data recorded."]
         }
 
-try:
-    init_db()
-except Exception:
-    pass
