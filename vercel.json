@@ -37,6 +37,10 @@
       "destination": "/index.html"
     },
     {
+      "source": "/book-converter/(.*)",
+      "destination": "/index.html"
+    },
+    {
       "source": "/book-converter",
       "destination": "/index.html"
     }
