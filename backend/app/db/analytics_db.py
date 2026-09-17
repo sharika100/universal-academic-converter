@@ -369,7 +369,10 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
         row = row_to_dict(cursor, cursor.fetchone())
         total_sessions = row.get("cnt") or 0
         
-        cursor.execute(f"SELECT COUNT(*) as cnt FROM analytics_sessions {session_date_clause + (' AND' if session_date_clause else 'WHERE')} (is_returning = 1 OR is_returning = true);")
+        if db_type == "postgres":
+            cursor.execute(f"SELECT COUNT(*) as cnt FROM analytics_sessions {session_date_clause + (' AND' if session_date_clause else 'WHERE')} (is_returning IS TRUE);")
+        else:
+            cursor.execute(f"SELECT COUNT(*) as cnt FROM analytics_sessions {session_date_clause + (' AND' if session_date_clause else 'WHERE')} (is_returning = 1 OR is_returning = true);")
         row = row_to_dict(cursor, cursor.fetchone())
         returning_sessions = row.get("cnt") or 0
         
@@ -484,15 +487,26 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
                 "percentage": pct
             })
 
-        cursor.execute(f"""
-        SELECT 
-            SUM(CASE WHEN validation_passed = 1 OR validation_passed = true THEN 1 ELSE 0 END) as val_pass,
-            COUNT(validation_passed) as val_total,
-            SUM(CASE WHEN compilation_passed = 1 OR compilation_passed = true THEN 1 ELSE 0 END) as comp_pass,
-            COUNT(compilation_passed) as comp_total
-        FROM analytics_events
-        {date_clause if date_clause else 'WHERE 1=1'} AND event_type = 'conversion_result';
-        """)
+        if db_type == "postgres":
+            cursor.execute(f"""
+            SELECT 
+                SUM(CASE WHEN validation_passed IS TRUE THEN 1 ELSE 0 END) as val_pass,
+                COUNT(validation_passed) as val_total,
+                SUM(CASE WHEN compilation_passed IS TRUE THEN 1 ELSE 0 END) as comp_pass,
+                COUNT(compilation_passed) as comp_total
+            FROM analytics_events
+            {date_clause if date_clause else 'WHERE 1=1'} AND event_type = 'conversion_result';
+            """)
+        else:
+            cursor.execute(f"""
+            SELECT 
+                SUM(CASE WHEN validation_passed = 1 OR validation_passed = true THEN 1 ELSE 0 END) as val_pass,
+                COUNT(validation_passed) as val_total,
+                SUM(CASE WHEN compilation_passed = 1 OR compilation_passed = true THEN 1 ELSE 0 END) as comp_pass,
+                COUNT(compilation_passed) as comp_total
+            FROM analytics_events
+            {date_clause if date_clause else 'WHERE 1=1'} AND event_type = 'conversion_result';
+            """)
         q_row = row_to_dict(cursor, cursor.fetchone())
         val_pass = q_row.get("val_pass") or 0
         val_total = q_row.get("val_total") or 0
@@ -513,14 +527,24 @@ def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
             "overall_delivery_rate": success_rate_percent
         }
         
-        cursor.execute(f"""
-        SELECT 
-            AVG(rating) as avg_rating,
-            COUNT(*) as total_feedback,
-            SUM(CASE WHEN is_useful = 1 OR is_useful = true THEN 1 ELSE 0 END) as useful_cnt
-        FROM analytics_feedback
-        {date_clause};
-        """)
+        if db_type == "postgres":
+            cursor.execute(f"""
+            SELECT 
+                AVG(rating) as avg_rating,
+                COUNT(*) as total_feedback,
+                SUM(CASE WHEN is_useful IS TRUE THEN 1 ELSE 0 END) as useful_cnt
+            FROM analytics_feedback
+            {date_clause};
+            """)
+        else:
+            cursor.execute(f"""
+            SELECT 
+                AVG(rating) as avg_rating,
+                COUNT(*) as total_feedback,
+                SUM(CASE WHEN is_useful = 1 OR is_useful = true THEN 1 ELSE 0 END) as useful_cnt
+            FROM analytics_feedback
+            {date_clause};
+            """)
         fb_row = row_to_dict(cursor, cursor.fetchone())
         raw_avg = fb_row.get("avg_rating")
         tot_fb = fb_row.get("total_feedback") or 0
