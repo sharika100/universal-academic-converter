@@ -35,6 +35,10 @@
     {
       "source": "/admin",
       "destination": "/index.html"
+    },
+    {
+      "source": "/book-converter",
+      "destination": "/index.html"
     }
   ],
   "headers": [
