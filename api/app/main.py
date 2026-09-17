@@ -149,13 +149,14 @@ INLINE_INDEX_HTML = """<!doctype html>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <script type="module" crossorigin src="/assets/index-DO8rJrWL.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DdlYOea-.css">
+    <script type="module" crossorigin src="/assets/index-By2ihgcc.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CuU9JyVg.css">
   </head>
   <body>
     <div id="root"></div>
   </body>
 </html>"""
+
 
 class StorageAnalysisRequest(BaseModel):
     upload_id: str
