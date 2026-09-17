@@ -1,7 +1,4 @@
 {
-  "installCommand": "npm --prefix frontend install && npm install",
-  "buildCommand": "npm --prefix frontend run build",
-  "outputDirectory": "frontend/dist",
   "rewrites": [
     {
       "source": "/api/upload-token(.*)",
@@ -67,5 +64,3 @@
     }
   ]
 }
-
-
