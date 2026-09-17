@@ -95,9 +95,8 @@ class LatexRenderer:
             fh.write(main_tex_content)
         created_files.append("main.tex")
         
-        # AUTOMATED INTEGRITY VALIDATION & FALLBACK: Ensure every \includegraphics file reference in main.tex exists
+        # AUTOMATED INTEGRITY VALIDATION: Every \includegraphics file reference in main.tex MUST exist in output directory!
         referenced_imgs = re.findall(r'\\includegraphics(?:\[.*?\])?\{([^}]+)\}', main_tex_content)
-        MINIMAL_PNG = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\rIDATx\x9cc\xf8\xff\xff?\x03\x00\x05\xfe\x02\xfe\xa7\x96"\x64\x00\x00\x00\x00IEND\xaeB`\x82'
         for ref_img in referenced_imgs:
             ref_clean = ref_img.strip()
             candidates = [
@@ -105,18 +104,10 @@ class LatexRenderer:
                 os.path.normpath(os.path.join(output_dir, "figures", os.path.basename(ref_clean)))
             ]
             if not any(os.path.exists(c) or any(os.path.exists(c + ext) for ext in [".png", ".jpg", ".jpeg", ".pdf", ".eps"]) for c in candidates):
-                # Fallback: create placeholder image in figures directory so compilation and output integrity succeed
-                fallback_path = os.path.join(fig_dir, os.path.basename(ref_clean))
-                if not fallback_path.endswith(('.png', '.jpg', '.jpeg', '.pdf', '.eps')):
-                    fallback_path += '.png'
-                try:
-                    with open(fallback_path, 'wb') as fh:
-                        fh.write(MINIMAL_PNG)
-                    rel_name = os.path.relpath(fallback_path, output_dir).replace('\\', '/')
-                    if rel_name not in created_files:
-                        created_files.append(rel_name)
-                except Exception:
-                    pass
+                raise ValueError(
+                    f"OUTPUT INTEGRITY FAILURE: Generated main.tex references image '{ref_img}' "
+                    f"which does not exist in the physical output directory!"
+                )
         
         # 5. Zip generated project into output_zip_path
         os.makedirs(os.path.dirname(output_zip_path), exist_ok=True)
@@ -130,8 +121,46 @@ class LatexRenderer:
         return created_files
 
     @staticmethod
+    def sanitize_latex_preamble(preamble: str) -> str:
+        r"""Strips sample metadata macros (\title, \author, \date, \subtitle, \thanks, \institute, \address) from a LaTeX template preamble."""
+        for cmd in ["title", "author", "date", "subtitle", "institute", "address", "thanks"]:
+            pattern = r'\\' + cmd + r'(?:\[[^\]]*\])?\s*\{'
+            while True:
+                m = re.search(pattern, preamble)
+                if not m:
+                    break
+                start_idx = m.start()
+                brace_count = 0
+                end_idx = -1
+                for i in range(m.end() - 1, len(preamble)):
+                    if preamble[i] == '{':
+                        brace_count += 1
+                    elif preamble[i] == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            end_idx = i
+                            break
+                if end_idx != -1:
+                    preamble = preamble[:start_idx] + preamble[end_idx + 1:]
+                else:
+                    break
+        cleaned_lines = []
+        for line in preamble.splitlines():
+            line_str = line.strip()
+            if line_str.startswith("%") and any(sample_kw in line_str.lower() for sample_kw in ["author:", "title:", "amber jain", "amberj", "sample"]):
+                continue
+            if any(sample_kw in line for sample_kw in ["Sample Book Title", "Sample author", "First-name Last-name", "Calvin and Hobbes"]):
+                continue
+            cleaned_lines.append(line)
+        return "\n".join(cleaned_lines)
+
+    @staticmethod
     def _generate_main_tex(udm: UniversalDocumentModel, spec: TemplateSpecification, output_dir: str = "") -> str:
         lines = []
+        
+        is_book = (spec.document_class or "").lower() in ["book", "report", "memoir", "scrbook", "scrreprt"] or (
+            spec.sample_content and "\\documentclass" in spec.sample_content and bool(re.search(r'\\documentclass(?:\[[^\]]*\])?\{(book|report)\}', spec.sample_content))
+        )
         
         # Detect Springer template (.cls or .bst in output_dir or spec)
         is_springer = (spec.document_class == "sn-jnl" or spec.author_style == "springer" or 
@@ -151,14 +180,13 @@ class LatexRenderer:
             lines.append("\\usepackage{algorithmicx}")
             lines.append("\\usepackage{algpseudocode}")
             lines.append("\\usepackage{listings}")
-            lines.append("\n\\begin{document}\n")
         elif spec.sample_content and "\\begin{document}" in spec.sample_content:
-            preamble = spec.sample_content.split("\\begin{document}")[0].strip()
+            raw_preamble = spec.sample_content.split("\\begin{document}")[0].strip()
+            preamble = LatexRenderer.sanitize_latex_preamble(raw_preamble)
             for pkg in ["graphicx", "amsmath", "amssymb", "booktabs", "url"]:
                 if f"\\usepackage{{{pkg}}}" not in preamble and f"\\usepackage[{pkg}]" not in preamble:
                     preamble += f"\n\\usepackage{{{pkg}}}"
             lines.append(preamble)
-            lines.append("\n\\begin{document}\n")
         else:
             opts = f"[{','.join(spec.class_options)}]" if spec.class_options else ""
             cls = spec.document_class or "article"
@@ -172,7 +200,6 @@ class LatexRenderer:
             lines.append("\\usepackage{algpseudocode}")
             if spec.citation_system == "natbib":
                 lines.append("\\usepackage{natbib}")
-            lines.append("\n\\begin{document}\n")
         
         # Title
         title_str = udm.metadata.title if udm.metadata.title else "Explainable Aspect-Sentiment Framework for Personalized Malayalam Movie Recommendation"
@@ -201,7 +228,6 @@ class LatexRenderer:
             for aff in affiliations:
                 if aff.institution:
                     lines.append(f"\\affil[{aff.id}]{{\\orgname{{{aff.institution}}}}}")
-            lines.append("\\maketitle\n")
         elif spec.author_style == "elsevier":
             for a_idx, a in enumerate(authors):
                 aff_tag = ",".join(a.affiliation_ids) if a.affiliation_ids else "1"
@@ -211,7 +237,6 @@ class LatexRenderer:
             for aff in affiliations:
                 if aff.institution:
                     lines.append(f"\\address[{aff.id}]{{{aff.institution}}}")
-            lines.append("\\maketitle\n")
         elif spec.author_style == "ieee" or spec.document_class == "IEEEtran":
             author_blocks = []
             for a in authors:
@@ -231,16 +256,25 @@ class LatexRenderer:
                     author_blocks.append(f"\\IEEEauthorblockN{{{a.name}}}\n\\IEEEauthorblockA{{\n{aff_text}\n}}")
                 else:
                     author_blocks.append(f"\\IEEEauthorblockN{{{a.name}}}")
-            lines.append(f"\\author{{\n{ '\n\\and\n'.join(author_blocks) }\n}}\n\\maketitle\n")
+            lines.append(f"\\author{{\n{ '\n\\and\n'.join(author_blocks) }\n}}")
         else: # Standard / Default
+            author_blocks = []
             for a in authors:
-                inst_tag = ",".join(a.affiliation_ids) if a.affiliation_ids else "1"
-                email_str = f"\\thanks{{{a.email}}}" if hasattr(a, 'email') and a.email else ""
-                lines.append(f"\\author{{{a.name}$^{{{inst_tag}}}${email_str}}}")
-            if affiliations:
-                inst_lines = [f"$^{{{aff.id}}}$ {aff.institution}" for aff in affiliations if aff.institution]
-                if inst_lines:
-                    lines.append(f"\\institute{{{ ' \\\\ '.join(inst_lines) }}}")
+                inst_lines = [aff.institution for aff in affiliations if (aff.id in a.affiliation_ids or not a.affiliation_ids) and aff.institution]
+                clean_inst_lines = [inst for inst in inst_lines if not re.search(r'\b\d{5,15}\b|phone|tel|mob', inst, re.I)]
+                if clean_inst_lines:
+                    author_blocks.append(f"{a.name}\\\\\n\\small {', '.join(clean_inst_lines)}")
+                else:
+                    author_blocks.append(a.name)
+            lines.append(f"\\author{{{ ' \\and '.join(author_blocks) }}}")
+            
+        lines.append("\n\\begin{document}\n")
+
+        if is_book:
+            lines.append("\\frontmatter")
+            lines.append("\\maketitle\n")
+            lines.append("\\mainmatter\n")
+        else:
             lines.append("\\maketitle\n")
             
         # Abstract
@@ -260,8 +294,15 @@ class LatexRenderer:
             
         # Sections
         for sec in udm.sections:
-            cmd = "\\section" if sec.level == 1 else ("\\subsection" if sec.level == 2 else ("\\subsubsection" if sec.level == 3 else "\\paragraph"))
-            lines.append(f"{cmd}{{{sec.title}}}")
+            if is_book:
+                cmd = "\\chapter" if sec.level == 1 else ("\\section" if sec.level == 2 else ("\\subsection" if sec.level == 3 else "\\subsubsection"))
+            else:
+                cmd = "\\section" if sec.level == 1 else ("\\subsection" if sec.level == 2 else ("\\subsubsection" if sec.level == 3 else "\\paragraph"))
+                
+            clean_sec_title = re.sub(r'^(?:Chapter\s+\d+|Section\s+\d+|\d+(\.\d+)+|\d+\.|\b[IVXLCDM]+\.)\s*', '', sec.title, flags=re.I).strip()
+            sec_heading_title = clean_sec_title if clean_sec_title else sec.title
+            
+            lines.append(f"{cmd}{{{sec_heading_title}}}")
             if hasattr(sec, 'label') and sec.label:
                 lines.append(f"\\label{{{sec.label}}}")
                 

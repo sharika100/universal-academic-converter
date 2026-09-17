@@ -55,21 +55,24 @@ class DocxParser:
                     title_idx = idx
                 
                 is_explicit_heading = (
-                    "heading 1" in style_name
+                    "heading" in style_name
                     or text.lower().startswith("abstract")
-                    or bool(re.match(r'^(?:1\.|I\.|ONE)\s+[A-Za-z]', text, re.I))
+                    or text.lower().startswith("introduction")
+                    or bool(re.match(r'^(?:1\.|I\.|ONE|\d+(\.\d+)*)\s+[A-Za-z]', text, re.I))
+                    or any(kw in text.lower() for kw in ["hybrid", "blended", "ict for", "benefits of", "challenges in", "conclusion", "references", "related work", "methodology"])
                 )
                 if is_explicit_heading and idx > 0:
                     first_heading_idx = min(first_heading_idx, idx)
                     
-        # Parse Title & Author/Affiliation block
+        # Parse Title & Author/Affiliation block (Strictly bounded to top 6 lines below Title)
         header_lines = []
         if title_idx != -1:
             title_p = DocxParagraph(body_elements[title_idx], doc)
             udm.metadata.title = title_p.text.strip()
             udm.metadata.document_title = title_p.text.strip()
             
-            header_end = first_heading_idx
+            # Strictly limit header extraction to at most 6 paragraphs below title
+            header_end = min(title_idx + 6, first_heading_idx)
             for idx in range(title_idx + 1, header_end):
                 elem = body_elements[idx]
                 if isinstance(elem, CT_P):
@@ -85,10 +88,13 @@ class DocxParser:
             udm.metadata.header_raw_text = header_raw
             
         consumed_header_texts = set()
-        for d in header_lines:
-            txt = (d.get("full_text", "") if isinstance(d, dict) else str(d)).strip()
-            if txt:
-                consumed_header_texts.add(txt.lower())
+        if title_idx != -1:
+            consumed_header_texts.add(udm.metadata.title.lower())
+        for a in udm.metadata.authors:
+            consumed_header_texts.add(a.name.lower())
+        for aff in udm.metadata.affiliations:
+            if aff.raw_text:
+                consumed_header_texts.add(aff.raw_text.lower())
 
         # 2. Extract Generic Label-Values & Fields across document
         label_values = DocxParser._extract_label_values(doc)
@@ -112,7 +118,7 @@ class DocxParser:
             style_name = p.style.name.lower() if p.style else ""
             
             para_rids = DocxParser._get_paragraph_image_rids(p, rel_image_map)
-            is_caption = bool(re.match(r'^(fig|figure|chart|diagram)\b', text, re.I)) or "caption" in style_name
+            is_caption = bool(re.match(r'^(fig|figure|chart|diagram|table)\b', text, re.I)) or "caption" in style_name
             
             if para_rids:
                 for rId in para_rids:
@@ -175,7 +181,7 @@ class DocxParser:
                 return
                 
             if is_caption:
-                if current_section.blocks and isinstance(current_section.blocks[-1], dict) and current_section.blocks[-1].get("type") == "figure":
+                if current_section.blocks and isinstance(current_section.blocks[-1], dict) and current_section.blocks[-1].get("type") in ["figure", "table"]:
                     current_section.blocks[-1]["caption"] = text
                 else:
                     pending_caption = text
@@ -361,6 +367,9 @@ class DocxParser:
                         name=" , ".join(headers) if headers else "Signature Block"
                     ))
                     
+                tbl_caption = pending_caption if pending_caption else f"Table {len(current_section.blocks)+1}"
+                pending_caption = None
+
                 tbl_obj = Table(
                     id=f"tbl_{len(current_section.blocks)+1}",
                     headers=headers,
@@ -368,7 +377,7 @@ class DocxParser:
                     cells=cell_matrix,
                     colspan_matrix=colspan_mat,
                     rowspan_matrix=rowspan_mat,
-                    caption=f"Table {len(current_section.blocks)+1}"
+                    caption=tbl_caption
                 )
                 current_section.blocks.append(tbl_obj.model_dump())
                 
@@ -510,7 +519,8 @@ class DocxParser:
             if not txt:
                 continue
                 
-            if any(kw in txt.lower() for kw in ["university", "institute", "college", "department", "school", "coimbatore", "tamil nadu"]):
+            txt_lower = txt.lower()
+            if any(kw in txt_lower for kw in ["university", "institute", "college", "department", "school", "coimbatore", "tamil nadu", "professor", "lecturer", "scholar", "designation", "phone"]):
                 aff_id = f"aff{len(affiliations)+1}"
                 m_num = re.match(r'^([\d\*†‡§]+)\s*(.+)$', txt)
                 if m_num:
@@ -525,7 +535,17 @@ class DocxParser:
                 ))
                 continue
                 
-            if txt.lower().startswith("abstract") or txt.lower().startswith("keywords"):
+            if any(kw in txt_lower for kw in ["abstract", "keywords", "introduction", "hybrid", "blended", "education", "educators", "learners", "benefits", "challenges", "conclusion", "references", "table", "figure"]):
+                continue
+
+            # Reject phone numbers, emails, URLs, colons, or digits
+            if re.search(r'\b\d{5,15}\b|phone|tel|mob|http|@|:', txt, re.I):
+                if re.search(r'\b\d{5,15}\b|phone|tel|mob', txt, re.I):
+                    affiliations.append(Affiliation(
+                        id=f"aff{len(affiliations)+1}",
+                        institution=txt,
+                        raw_text=txt
+                    ))
                 continue
 
             candidate_names = [txt]
@@ -543,8 +563,8 @@ class DocxParser:
                 parts = clean_name.split()
                 is_plausible_name = (
                     1 <= len(parts) <= 4
-                    and not any(kw in clean_name.lower() for kw in ["department", "university", "institute", "college", "school", "abstract", "keywords", "email", "@", "scholar", "professor", "coimbatore", "tamil nadu", "ndcg", "precision", "recall", "f1", "accuracy", "begin", "end"])
-                    and not re.search(r'[\d\\\{\}\[\]]', clean_name)
+                    and not any(kw in clean_name.lower() for kw in ["department", "university", "institute", "college", "school", "abstract", "keywords", "email", "@", "scholar", "professor", "coimbatore", "tamil nadu", "ndcg", "precision", "recall", "f1", "accuracy", "begin", "end", "phone", "introduction", "hybrid", "education", "challenges", "conclusion", "benefits"])
+                    and not re.search(r'[\d\\\{\}\[\]:]', clean_name)
                 )
                 
                 if is_plausible_name:
