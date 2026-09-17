@@ -1,4 +1,6 @@
 {
+  "buildCommand": "npm --prefix frontend install && npm --prefix frontend run build",
+  "outputDirectory": "frontend/dist",
   "rewrites": [
     {
       "source": "/api/upload-token(.*)",
@@ -42,6 +44,10 @@
     },
     {
       "source": "/book-converter",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/((?!api/|assets/|favicon.ico|index.html).*)",
       "destination": "/index.html"
     }
   ],
