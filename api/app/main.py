@@ -30,8 +30,6 @@ from app.renderers.latex_renderer import LatexRenderer
 from app.validation.integrity_checker import IntegrityChecker
 from app.validation.template_validator import TemplateValidator
 from app.compilation.latex_sandbox import LatexSandbox
-from app.api.analytics import router as analytics_router
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("UniversalConverter")
 
@@ -49,7 +47,12 @@ if hasattr(Request._get_form, "__kwdefaults__") and Request._get_form.__kwdefaul
 
 app = FastAPI(title="Universal Academic Format Converter API")
 
-app.include_router(analytics_router)
+try:
+    from app.api.analytics import router as analytics_router
+    app.include_router(analytics_router)
+    logger.info("Analytics router successfully mounted.")
+except Exception as analytics_err:
+    logger.error(f"Failed to mount analytics router: {analytics_err}")
 
 app.add_middleware(
     CORSMiddleware,
