@@ -31,20 +31,38 @@ def verify_password(password: str, stored_hash: str, salt: str) -> bool:
     computed_hash, _ = hash_password(password, salt)
     return secrets.compare_digest(computed_hash, stored_hash)
 
+def get_pg_url() -> Optional[str]:
+    """Resolves PostgreSQL connection string from Vercel / Supabase environment variables."""
+    keys = [
+        "DATABASE_URL",
+        "SUPABASE_POSTGRES_URL",
+        "SUPABASE_POSTGRES_PRISMA_URL",
+        "POSTGRES_URL",
+        "POSTGRES_PRISMA_URL"
+    ]
+    for k in keys:
+        val = os.environ.get(k)
+        if val and isinstance(val, str) and (val.startswith("postgres://") or val.startswith("postgresql://")):
+            return val.replace("postgres://", "postgresql://", 1)
+    return None
+
 def get_db_connection():
-    """Returns a database connection (PostgreSQL via pure-Python pg8000 if DATABASE_URL set, otherwise SQLite)."""
-    if DATABASE_URL and (DATABASE_URL.startswith("postgres://") or DATABASE_URL.startswith("postgresql://")):
+    """Returns a database connection (PostgreSQL via pure-Python pg8000 in production/Supabase, or SQLite for local dev)."""
+    pg_url = get_pg_url()
+    is_production = bool(os.environ.get("VERCEL") or os.environ.get("VERCEL_ENV"))
+
+    if pg_url:
         try:
             import pg8000.dbapi
             import urllib.parse
-            pg_url = DATABASE_URL.replace("postgres://", "postgresql://", 1)
             parsed = urllib.parse.urlparse(pg_url)
+            db_name = parsed.path.lstrip('/').split('?')[0] or "postgres"
             conn = pg8000.dbapi.connect(
                 user=parsed.username or "postgres",
                 password=parsed.password or "",
                 host=parsed.hostname or "localhost",
                 port=parsed.port or 5432,
-                database=parsed.path.lstrip('/') or "postgres",
+                database=db_name,
                 ssl_context=True
             )
             return conn, "postgres"
@@ -52,12 +70,17 @@ def get_db_connection():
             try:
                 import psycopg2
                 import psycopg2.extras
-                pg_url = DATABASE_URL.replace("postgres://", "postgresql://", 1)
                 conn = psycopg2.connect(pg_url, cursor_factory=psycopg2.extras.RealDictCursor)
                 return conn, "postgres"
             except Exception as e_ps:
-                logger.warning(f"[ANALYTICS_DB] PostgreSQL connection failed (pg8000: {e_pg}, psycopg2: {e_ps}), falling back to SQLite")
-            
+                err_msg = f"[ANALYTICS_DB] PostgreSQL connection failed (pg8000: {e_pg}, psycopg2: {e_ps})"
+                logger.error(err_msg)
+                if is_production:
+                    raise RuntimeError(err_msg)
+
+    if is_production:
+        raise RuntimeError("[ANALYTICS_DB] Production environment detected on Vercel, but no PostgreSQL connection URL (DATABASE_URL / SUPABASE_POSTGRES_URL) was found.")
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn, "sqlite"
