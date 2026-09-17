@@ -13,17 +13,19 @@ function ensureBlobEnv() {
 
 function isAuthorized(request) {
   // 1. Allow Vercel Cron invocation (x-vercel-cron header or Bearer CRON_SECRET)
-  if (request.headers['x-vercel-cron']) return true;
-  if (process.env.CRON_SECRET && request.headers.authorization === `Bearer ${process.env.CRON_SECRET}`) return true;
+  const cronHeader = request.headers['x-vercel-cron'] || request.headers['X-Vercel-Cron'];
+  if (cronHeader) return true;
+
+  const authHeader = request.headers.authorization || request.headers['authorization'] || '';
+  if (process.env.CRON_SECRET && authHeader === `Bearer ${process.env.CRON_SECRET}`) return true;
 
   // 2. Allow server-side internal calls with Blob token
-  const authHeader = request.headers.authorization || '';
   const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (token && (authHeader.includes(token) || authHeader === `Bearer ${token}`)) return true;
+  if (token && authHeader && (authHeader.includes(token) || authHeader === `Bearer ${token}`)) return true;
 
   // 3. Fallback check for internal backend requests
-  const internalSecret = request.headers['x-internal-delete-key'];
-  if (token && internalSecret === token.slice(-16)) return true;
+  const internalSecret = request.headers['x-internal-delete-key'] || request.headers['X-Internal-Delete-Key'];
+  if (token && internalSecret && internalSecret === token.slice(-16)) return true;
 
   return false;
 }

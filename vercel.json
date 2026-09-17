@@ -34,27 +34,27 @@
   ],
   "routes": [
     {
-      "src": "/api/upload-token",
+      "src": "/api/upload-token(.*)",
       "dest": "api/upload-token.js"
     },
     {
-      "src": "/api/blob-upload-token",
+      "src": "/api/blob-upload-token(.*)",
       "dest": "api/upload-token.js"
     },
     {
-      "src": "/api/blob-download",
+      "src": "/api/blob-download(.*)",
       "dest": "api/blob-download.js"
     },
     {
-      "src": "/api/blob-delete",
+      "src": "/api/blob-delete(.*)",
       "dest": "api/blob-delete.js"
     },
     {
-      "src": "/api/blob-test",
+      "src": "/api/blob-test(.*)",
       "dest": "api/blob-test.js"
     },
     {
-      "src": "/api/blob-diag",
+      "src": "/api/blob-diag(.*)",
       "dest": "api/blob-diag.js"
     },
     {
