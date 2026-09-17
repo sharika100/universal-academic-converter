@@ -813,96 +813,108 @@ async def convert_document(
         ))
         
     logger.info(f"[{ref_id}] Executing Format Conversion: {udm.source_format} → {spec.format_type.upper()}")
-    mapping_res = MappingEngine.map_and_evaluate(udm, spec)
     
-    output_dir = os.path.join(job_dir, "output")
-    os.makedirs(output_dir, exist_ok=True)
-    
-    created_files = []
-    output_pdf_path = os.path.join(output_dir, "preview.pdf")
-    
-    if spec.format_type == "latex":
-        output_zip_path = os.path.join(output_dir, "converted_project.zip")
-        dest_template_dir = os.path.join(job_dir, "template", "extracted")
+    try:
+        mapping_res = MappingEngine.map_and_evaluate(udm, spec)
         
-        if not os.path.exists(dest_template_dir) or not os.listdir(dest_template_dir):
-            sample_zip = os.path.join(SAMPLES_DIR, "springer_template.zip")
-            if os.path.exists(sample_zip):
-                ZipGuard.inspect_and_extract_safe(sample_zip, dest_template_dir)
-            else:
-                os.makedirs(dest_template_dir, exist_ok=True)
-                
-        created_files = LatexRenderer.render_project(
-            udm=udm,
-            spec=spec,
-            dest_template_dir=dest_template_dir,
-            output_dir=os.path.join(output_dir, "latex_proj"),
-            output_zip_path=output_zip_path
-        )
+        output_dir = os.path.join(job_dir, "output")
+        os.makedirs(output_dir, exist_ok=True)
+        
+        created_files = []
+        output_pdf_path = os.path.join(output_dir, "preview.pdf")
+        
+        if spec.format_type == "latex":
+            output_zip_path = os.path.join(output_dir, "converted_project.zip")
+            dest_template_dir = os.path.join(job_dir, "template", "extracted")
+            
+            if not os.path.exists(dest_template_dir) or not os.listdir(dest_template_dir):
+                sample_zip = os.path.join(SAMPLES_DIR, "springer_template.zip")
+                if os.path.exists(sample_zip):
+                    ZipGuard.inspect_and_extract_safe(sample_zip, dest_template_dir)
+                else:
+                    os.makedirs(dest_template_dir, exist_ok=True)
+                    
+            created_files = LatexRenderer.render_project(
+                udm=udm,
+                spec=spec,
+                dest_template_dir=dest_template_dir,
+                output_dir=os.path.join(output_dir, "latex_proj"),
+                output_zip_path=output_zip_path
+            )
 
-        is_valid_proj, val_errs = TemplateValidator.validate_rendered_project(
-            output_dir=os.path.join(output_dir, "latex_proj"),
-            udm=udm
-        )
-        if not is_valid_proj:
-            logger.error(f"[{ref_id}] Rendered project validation failed: {val_errs}")
-            return JSONResponse(status_code=400, content=create_error_payload(
-                stage="conversion",
-                error_code="CONVERSION_VALIDATION_ERROR",
-                message="Rendered target project failed structural integrity validation.",
-                detail="; ".join(val_errs),
-                ref_id=ref_id
-            ))
-        
-        entrypoint = "main.tex"
-        compiled, sandbox_log = LatexSandbox.compile_project(
-            project_dir=os.path.join(output_dir, "latex_proj"),
-            entrypoint=entrypoint,
-            udm=udm,
-            output_pdf_path=output_pdf_path
-        )
-    else:
-        output_docx_path = os.path.join(output_dir, "converted_document.docx")
-        DocxRenderer.render(udm, spec, output_docx_path)
-        created_files.append("converted_document.docx")
-        
-        compiled, sandbox_log = LatexSandbox.compile_project(
-            project_dir=output_dir,
-            entrypoint="",
-            udm=udm,
-            output_pdf_path=output_pdf_path
-        )
+            is_valid_proj, val_errs = TemplateValidator.validate_rendered_project(
+                output_dir=os.path.join(output_dir, "latex_proj"),
+                udm=udm
+            )
+            if not is_valid_proj:
+                logger.error(f"[{ref_id}] Rendered project validation failed: {val_errs}")
+                return JSONResponse(status_code=400, content=create_error_payload(
+                    stage="conversion",
+                    error_code="CONVERSION_VALIDATION_ERROR",
+                    message="Rendered target project failed structural integrity validation.",
+                    detail="; ".join(val_errs),
+                    ref_id=ref_id
+                ))
+            
+            entrypoint = "main.tex"
+            compiled, sandbox_log = LatexSandbox.compile_project(
+                project_dir=os.path.join(output_dir, "latex_proj"),
+                entrypoint=entrypoint,
+                udm=udm,
+                output_pdf_path=output_pdf_path
+            )
+        else:
+            output_docx_path = os.path.join(output_dir, "converted_document.docx")
+            DocxRenderer.render(udm, spec, output_docx_path)
+            created_files.append("converted_document.docx")
+            
+            compiled, sandbox_log = LatexSandbox.compile_project(
+                project_dir=output_dir,
+                entrypoint="",
+                udm=udm,
+                output_pdf_path=output_pdf_path
+            )
 
-    output_udm = udm
-    integrity = IntegrityChecker.compare_integrity(udm, output_udm)
-    validation_checks = TemplateValidator.validate_conformity(spec)
-    
-    report = ConversionReport(
-        job_id=job_id,
-        source_format=udm.source_format,
-        destination_format=spec.format_type.upper(),
-        source_confidence=udm.parsing_confidence,
-        template_confidence=spec.template_confidence,
-        conformity_estimate=mapping_res["compatibility"]["overall"],
-        integrity=integrity,
-        validation_checks=validation_checks,
-        warnings=mapping_res["warnings"],
-        converted_files=created_files,
-        pdf_compiled=compiled,
-        sandbox_log=sandbox_log
-    )
-    
-    report_path = os.path.join(output_dir, "report.json")
-    with open(report_path, "w", encoding="utf-8") as fh:
-        fh.write(report.model_dump_json())
+        output_udm = udm
+        integrity = IntegrityChecker.compare_integrity(udm, output_udm)
+        validation_checks = TemplateValidator.validate_conformity(spec)
         
-    return {
-        "status": "SUCCESS",
-        "job_id": job_id,
-        "reference_id": ref_id,
-        "report": report.model_dump(),
-        "mapping": mapping_res
-    }
+        report = ConversionReport(
+            job_id=job_id,
+            source_format=udm.source_format,
+            destination_format=spec.format_type.upper(),
+            source_confidence=udm.parsing_confidence,
+            template_confidence=spec.template_confidence,
+            conformity_estimate=mapping_res["compatibility"]["overall"],
+            integrity=integrity,
+            validation_checks=validation_checks,
+            warnings=mapping_res["warnings"],
+            converted_files=created_files,
+            pdf_compiled=compiled,
+            sandbox_log=sandbox_log
+        )
+        
+        report_path = os.path.join(output_dir, "report.json")
+        with open(report_path, "w", encoding="utf-8") as fh:
+            fh.write(report.model_dump_json())
+            
+        return {
+            "status": "SUCCESS",
+            "job_id": job_id,
+            "reference_id": ref_id,
+            "report": report.model_dump(),
+            "mapping": mapping_res
+        }
+    except Exception as conv_err:
+        tb_str = traceback.format_exc()
+        logger.error(f"[{ref_id}] Conversion execution exception: {conv_err}\n{tb_str}")
+        return JSONResponse(status_code=500, content=create_error_payload(
+            stage="conversion",
+            error_code="CONVERSION_SERVER_EXCEPTION",
+            message="An unexpected server error occurred during conversion.",
+            detail=f"{str(conv_err)} | Traceback: {tb_str[:200]}",
+            ref_id=ref_id
+        ))
 
 @app.get("/api/download/{job_id}/{file_kind}")
 @app.get("/download/{job_id}/{file_kind}")
