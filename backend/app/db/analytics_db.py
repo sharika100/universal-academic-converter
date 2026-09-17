@@ -44,6 +44,16 @@ def get_pg_url() -> Optional[str]:
         val = os.environ.get(k)
         if val and isinstance(val, str) and (val.startswith("postgres://") or val.startswith("postgresql://")):
             return val.replace("postgres://", "postgresql://", 1)
+
+    # Construct from individual Supabase / Postgres environment variables if URL is missing
+    host = os.environ.get("SUPABASE_POSTGRES_HOST") or os.environ.get("POSTGRES_HOST")
+    password = os.environ.get("SUPABASE_POSTGRES_PASSWORD") or os.environ.get("POSTGRES_PASSWORD")
+    if host and password:
+        user = os.environ.get("SUPABASE_POSTGRES_USER") or os.environ.get("POSTGRES_USER") or "postgres"
+        db = os.environ.get("SUPABASE_POSTGRES_DATABASE") or os.environ.get("POSTGRES_DATABASE") or "postgres"
+        port = os.environ.get("SUPABASE_POSTGRES_PORT") or os.environ.get("POSTGRES_PORT") or "5432"
+        return f"postgresql://{user}:{password}@{host}:{port}/{db}"
+
     return None
 
 def get_db_connection():
