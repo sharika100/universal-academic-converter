@@ -10,3 +10,5 @@ pillow>=10.2.0
 lxml>=5.1.0
 starlette>=0.36.0
 requests>=2.31.0
+PyJWT>=2.8.0
+pg8000>=1.30.0
