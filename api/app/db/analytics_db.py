@@ -7,9 +7,11 @@ import secrets
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 
+import tempfile
+
 logger = logging.getLogger("analytics_db")
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "analytics_local.db")
+DB_PATH = os.path.join(tempfile.gettempdir(), "analytics_local.db")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 def hash_password(password: str, salt: Optional[str] = None) -> (str, str):
