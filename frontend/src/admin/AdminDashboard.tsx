@@ -13,7 +13,9 @@ import {
   UserCheck,
   Layers,
   ArrowLeft,
-  MessageSquare
+  MessageSquare,
+  Lightbulb,
+  Calendar
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -33,12 +35,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<string>('');
+  const [selectedDays, setSelectedDays] = useState<number | null>(null);
 
-  const fetchMetrics = async () => {
+  const fetchMetrics = async (daysOverride?: number | null) => {
     setLoading(true);
     setError(null);
+    const activeDays = daysOverride !== undefined ? daysOverride : selectedDays;
     try {
-      const res = await fetch('/api/admin/analytics', {
+      const queryStr = activeDays ? `?days=${activeDays}` : '';
+      const res = await fetch(`/api/admin/analytics${queryStr}`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -63,10 +68,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   useEffect(() => {
-    fetchMetrics();
-    const interval = setInterval(fetchMetrics, 30000); // Auto-refresh every 30s
+    fetchMetrics(selectedDays);
+    const interval = setInterval(() => fetchMetrics(selectedDays), 30000); // Auto-refresh every 30s
     return () => clearInterval(interval);
-  }, [token]);
+  }, [token, selectedDays]);
+
+  const handleSelectDays = (d: number | null) => {
+    setSelectedDays(d);
+    fetchMetrics(d);
+  };
 
   if (loading && !data) {
     return (
@@ -87,11 +97,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const templates = data?.templates || [];
   const errors = data?.error_categories || data?.errors || [];
   const recentFeedback = feedbackSummary?.recent_comments || data?.recent_feedback || [];
+  const insights = data?.insights || [];
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans p-4 md:p-8">
       {/* Top Header */}
-      <div className="max-w-7xl mx-auto mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-6 border-b border-slate-800">
+      <div className="max-w-7xl mx-auto mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-6 border-b border-slate-800">
         <div className="flex items-center space-x-4">
           <button
             onClick={onBackToConverter}
@@ -113,7 +124,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         <div className="flex items-center space-x-3">
           <button
-            onClick={fetchMetrics}
+            onClick={() => fetchMetrics(selectedDays)}
             disabled={loading}
             className="flex items-center space-x-2 px-3.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-colors"
           >
@@ -136,14 +147,60 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </div>
 
+      {/* Date Filter Toolbar */}
+      <div className="max-w-7xl mx-auto mb-6 flex items-center justify-between bg-slate-900/60 border border-slate-800 rounded-xl p-3">
+        <div className="flex items-center space-x-2 text-xs text-slate-400">
+          <Calendar className="w-4 h-4 text-indigo-400" />
+          <span className="font-medium">Filter Time Window:</span>
+        </div>
+        <div className="flex items-center space-x-2">
+          {[
+            { label: 'Today', days: 1 },
+            { label: '7 Days', days: 7 },
+            { label: '30 Days', days: 30 },
+            { label: 'All Time', days: null }
+          ].map((item) => (
+            <button
+              key={item.label}
+              onClick={() => handleSelectDays(item.days)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                selectedDays === item.days
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'bg-slate-950/80 border border-slate-800 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {error && (
         <div className="max-w-7xl mx-auto mb-6 p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center justify-between">
           <span>{error}</span>
-          <button onClick={fetchMetrics} className="underline font-semibold">Retry</button>
+          <button onClick={() => fetchMetrics(selectedDays)} className="underline font-semibold">Retry</button>
         </div>
       )}
 
       <div className="max-w-7xl mx-auto space-y-8">
+        {/* Measured Insights Section */}
+        {insights.length > 0 && (
+          <div className="bg-gradient-to-r from-indigo-950/40 via-slate-900/80 to-slate-900/80 border border-indigo-500/20 rounded-2xl p-6 shadow-xl backdrop-blur-md">
+            <h3 className="text-sm font-semibold text-indigo-300 mb-3 flex items-center space-x-2">
+              <Lightbulb className="w-4 h-4 text-amber-400" />
+              <span>Factual Measured Insights</span>
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {insights.map((fact: string, idx: number) => (
+                <div key={idx} className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs text-slate-200 flex items-start space-x-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 flex-shrink-0"></span>
+                  <span>{fact}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* KPI Cards Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Card 1 */}

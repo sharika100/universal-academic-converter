@@ -2,6 +2,8 @@ import os
 import sqlite3
 import json
 import logging
+import hashlib
+import secrets
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 
@@ -10,32 +12,55 @@ logger = logging.getLogger("analytics_db")
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "analytics_local.db")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
+def hash_password(password: str, salt: Optional[str] = None) -> (str, str):
+    """Hashes a plaintext password using PBKDF2-HMAC-SHA256."""
+    if not salt:
+        salt = secrets.token_hex(16)
+    key = hashlib.pbkdf2_hmac(
+        'sha256',
+        password.encode('utf-8'),
+        salt.encode('utf-8'),
+        100000
+    )
+    return key.hex(), salt
+
+def verify_password(password: str, stored_hash: str, salt: str) -> bool:
+    """Verifies a plaintext password against a stored PBKDF2 hash and salt."""
+    computed_hash, _ = hash_password(password, salt)
+    return secrets.compare_digest(computed_hash, stored_hash)
+
 def get_db_connection():
     """Returns a database connection (PostgreSQL if DATABASE_URL set, otherwise SQLite)."""
     if DATABASE_URL and (DATABASE_URL.startswith("postgres://") or DATABASE_URL.startswith("postgresql://")):
         try:
             import psycopg2
             import psycopg2.extras
-            # Fix postgres:// URL for psycopg2 if needed
             pg_url = DATABASE_URL.replace("postgres://", "postgresql://", 1)
             conn = psycopg2.connect(pg_url, cursor_factory=psycopg2.extras.RealDictCursor)
             return conn, "postgres"
         except Exception as e:
             logger.warning(f"[ANALYTICS_DB] PostgreSQL connection failed, falling back to SQLite: {e}")
             
-    # SQLite fallback
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn, "sqlite"
 
 def init_db():
-    """Initializes analytics tables if they do not exist."""
+    """Initializes analytics tables, indexes, and seeds default admin user if missing."""
     try:
         conn, db_type = get_db_connection()
         cursor = conn.cursor()
         
         if db_type == "postgres":
             cursor.execute("""
+            CREATE TABLE IF NOT EXISTS admin_users (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(64) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                salt VARCHAR(64) NOT NULL,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
             CREATE TABLE IF NOT EXISTS analytics_sessions (
                 session_id VARCHAR(64) PRIMARY KEY,
                 started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -76,9 +101,21 @@ def init_db():
                 conversion_type VARCHAR(50),
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE INDEX IF NOT EXISTS idx_events_created_at ON analytics_events(created_at);
+            CREATE INDEX IF NOT EXISTS idx_events_type ON analytics_events(event_type);
+            CREATE INDEX IF NOT EXISTS idx_events_status ON analytics_events(status);
+            CREATE INDEX IF NOT EXISTS idx_errors_category ON analytics_errors(error_category);
             """)
         else: # SQLite
             cursor.executescript("""
+            CREATE TABLE IF NOT EXISTS admin_users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                salt TEXT NOT NULL,
+                is_active INTEGER DEFAULT 1,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
             CREATE TABLE IF NOT EXISTS analytics_sessions (
                 session_id TEXT PRIMARY KEY,
                 started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -119,11 +156,59 @@ def init_db():
                 conversion_type TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE INDEX IF NOT EXISTS idx_events_created_at ON analytics_events(created_at);
+            CREATE INDEX IF NOT EXISTS idx_events_type ON analytics_events(event_type);
+            CREATE INDEX IF NOT EXISTS idx_events_status ON analytics_events(status);
+            CREATE INDEX IF NOT EXISTS idx_errors_category ON analytics_errors(error_category);
             """)
         conn.commit()
+
+        # Check if admin_users is empty, seed initial credentials
+        cursor.execute("SELECT COUNT(*) as cnt FROM admin_users;")
+        row = cursor.fetchone()
+        admin_count = dict(row)["cnt"] if row else 0
+        if admin_count == 0:
+            env_user = os.environ.get("ADMIN_USERNAME", "admin")
+            env_pass = os.environ.get("ADMIN_PASSWORD", "admin123")
+            pwd_hash, salt = hash_password(env_pass)
+            if db_type == "postgres":
+                cursor.execute(
+                    "INSERT INTO admin_users (username, password_hash, salt) VALUES (%s, %s, %s);",
+                    (env_user, pwd_hash, salt)
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO admin_users (username, password_hash, salt) VALUES (?, ?, ?);",
+                    (env_user, pwd_hash, salt)
+                )
+            conn.commit()
+            logger.info(f"[ANALYTICS_DB] Initialized admin user '{env_user}' with PBKDF2 hashed password.")
+
         conn.close()
     except Exception as e:
         logger.warning(f"[ANALYTICS_DB_INIT_ERROR] {e}")
+
+def verify_admin_db_credentials(username: str, password: str) -> bool:
+    """Verifies credentials against stored PBKDF2 hash in admin_users table."""
+    init_db()
+    try:
+        conn, db_type = get_db_connection()
+        cursor = conn.cursor()
+        if db_type == "postgres":
+            cursor.execute("SELECT password_hash, salt FROM admin_users WHERE username = %s AND is_active = TRUE;", (username.strip(),))
+        else:
+            cursor.execute("SELECT password_hash, salt FROM admin_users WHERE username = ? AND is_active = 1;", (username.strip(),))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return False
+        r = dict(row)
+        return verify_password(password.strip(), r["password_hash"], r["salt"])
+    except Exception as e:
+        logger.warning(f"[VERIFY_ADMIN_CREDENTIALS_ERROR] {e}")
+        env_user = os.environ.get("ADMIN_USERNAME", "admin")
+        env_pass = os.environ.get("ADMIN_PASSWORD", "admin123")
+        return username.strip() == env_user and password.strip() == env_pass
 
 def record_session(session_id: str, is_returning: bool = False, browser_family: str = "Unknown"):
     try:
@@ -165,27 +250,27 @@ def record_event(
         if db_type == "postgres":
             cursor.execute("""
             INSERT INTO analytics_events (
-                session_id, event_type, conversion_type, destination_template, status,
-                upload_time_ms, conversion_time_ms, download_time_ms, total_time_ms,
-                validation_passed, compilation_passed
+                session_id, event_type, conversion_type, destination_template,
+                status, upload_time_ms, conversion_time_ms, download_time_ms,
+                total_time_ms, validation_passed, compilation_passed
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
             """, (
-                session_id, event_type, conversion_type, destination_template, status,
-                upload_time_ms, conversion_time_ms, download_time_ms, total_time_ms,
-                validation_passed, compilation_passed
+                session_id, event_type, conversion_type, destination_template,
+                status, upload_time_ms, conversion_time_ms, download_time_ms,
+                total_time_ms, validation_passed, compilation_passed
             ))
         else:
             cursor.execute("""
             INSERT INTO analytics_events (
-                session_id, event_type, conversion_type, destination_template, status,
-                upload_time_ms, conversion_time_ms, download_time_ms, total_time_ms,
-                validation_passed, compilation_passed
+                session_id, event_type, conversion_type, destination_template,
+                status, upload_time_ms, conversion_time_ms, download_time_ms,
+                total_time_ms, validation_passed, compilation_passed
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """, (
-                session_id, event_type, conversion_type, destination_template, status,
-                upload_time_ms, conversion_time_ms, download_time_ms, total_time_ms,
-                1 if validation_passed else (0 if validation_passed is not None else None),
-                1 if compilation_passed else (0 if compilation_passed is not None else None)
+                session_id, event_type, conversion_type, destination_template,
+                status, upload_time_ms, conversion_time_ms, download_time_ms,
+                total_time_ms, 1 if validation_passed else (0 if validation_passed is False else None),
+                1 if compilation_passed else (0 if compilation_passed is False else None)
             ))
         conn.commit()
         conn.close()
@@ -204,13 +289,15 @@ def record_error(
         cursor = conn.cursor()
         if db_type == "postgres":
             cursor.execute("""
-            INSERT INTO analytics_errors (session_id, error_category, error_code, conversion_type, destination_template)
-            VALUES (%s, %s, %s, %s, %s);
+            INSERT INTO analytics_errors (
+                session_id, error_category, error_code, conversion_type, destination_template
+            ) VALUES (%s, %s, %s, %s, %s);
             """, (session_id, error_category, error_code, conversion_type, destination_template))
         else:
             cursor.execute("""
-            INSERT INTO analytics_errors (session_id, error_category, error_code, conversion_type, destination_template)
-            VALUES (?, ?, ?, ?, ?);
+            INSERT INTO analytics_errors (
+                session_id, error_category, error_code, conversion_type, destination_template
+            ) VALUES (?, ?, ?, ?, ?);
             """, (session_id, error_category, error_code, conversion_type, destination_template))
         conn.commit()
         conn.close()
@@ -225,30 +312,40 @@ def record_feedback(
     conversion_type: Optional[str] = None
 ):
     try:
-        clean_text = (feedback_text or "").strip()[:500]
         conn, db_type = get_db_connection()
         cursor = conn.cursor()
+        clean_text = feedback_text.strip()[:1000] if feedback_text else None
         if db_type == "postgres":
             cursor.execute("""
-            INSERT INTO analytics_feedback (session_id, rating, is_useful, feedback_text, conversion_type)
-            VALUES (%s, %s, %s, %s, %s);
+            INSERT INTO analytics_feedback (
+                session_id, rating, is_useful, feedback_text, conversion_type
+            ) VALUES (%s, %s, %s, %s, %s);
             """, (session_id, rating, is_useful, clean_text, conversion_type))
         else:
             cursor.execute("""
-            INSERT INTO analytics_feedback (session_id, rating, is_useful, feedback_text, conversion_type)
-            VALUES (?, ?, ?, ?, ?);
+            INSERT INTO analytics_feedback (
+                session_id, rating, is_useful, feedback_text, conversion_type
+            ) VALUES (?, ?, ?, ?, ?);
             """, (session_id, rating, 1 if is_useful else 0, clean_text, conversion_type))
         conn.commit()
         conn.close()
     except Exception as e:
         logger.warning(f"[ANALYTICS_RECORD_FEEDBACK_ERROR] {e}")
 
-def get_dashboard_data() -> Dict[str, Any]:
-    """Queries and returns aggregated analytics metrics for the dashboard."""
+def get_dashboard_data(days: Optional[int] = None) -> Dict[str, Any]:
+    """Queries and returns aggregated metrics, date filtering, and evidence-backed factual insights."""
     init_db()
     try:
         conn, db_type = get_db_connection()
         cursor = conn.cursor()
+        
+        date_clause = ""
+        if days and days > 0:
+            if db_type == "postgres":
+                date_clause = f" WHERE created_at >= NOW() - INTERVAL '{days} days'"
+            else:
+                cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+                date_clause = f" WHERE created_at >= '{cutoff}'"
         
         cursor.execute("SELECT COUNT(*) as cnt FROM analytics_sessions;")
         row = cursor.fetchone()
@@ -258,31 +355,31 @@ def get_dashboard_data() -> Dict[str, Any]:
         row = cursor.fetchone()
         returning_sessions = dict(row)["cnt"] if row else 0
         
-        cursor.execute("SELECT COUNT(*) as cnt FROM analytics_events WHERE event_type = 'conversion_attempt';")
+        cursor.execute(f"SELECT COUNT(*) as cnt FROM analytics_events{date_clause} AND event_type = 'conversion_attempt';" if date_clause else "SELECT COUNT(*) as cnt FROM analytics_events WHERE event_type = 'conversion_attempt';")
         row = cursor.fetchone()
         total_conversion_attempts = dict(row)["cnt"] if row else 0
         
-        cursor.execute("SELECT COUNT(*) as cnt FROM analytics_events WHERE event_type = 'conversion_result' AND status = 'SUCCESS';")
+        cursor.execute(f"SELECT COUNT(*) as cnt FROM analytics_events{date_clause} AND event_type = 'conversion_result' AND (status = 'SUCCESS' OR status = 'completed');" if date_clause else "SELECT COUNT(*) as cnt FROM analytics_events WHERE event_type = 'conversion_result' AND (status = 'SUCCESS' OR status = 'completed');")
         row = cursor.fetchone()
         successful_conversions = dict(row)["cnt"] if row else 0
 
-        cursor.execute("SELECT COUNT(*) as cnt FROM analytics_events WHERE event_type = 'download_click';")
+        cursor.execute(f"SELECT COUNT(*) as cnt FROM analytics_events{date_clause} AND event_type = 'download_click';" if date_clause else "SELECT COUNT(*) as cnt FROM analytics_events WHERE event_type = 'download_click';")
         row = cursor.fetchone()
         total_downloads = dict(row)["cnt"] if row else 0
         
-        cursor.execute("SELECT COUNT(*) as cnt FROM analytics_errors;")
+        cursor.execute(f"SELECT COUNT(*) as cnt FROM analytics_errors{date_clause};" if date_clause else "SELECT COUNT(*) as cnt FROM analytics_errors;")
         row = cursor.fetchone()
         total_errors = dict(row)["cnt"] if row else 0
 
         success_rate_percent = round((successful_conversions / max(1, total_conversion_attempts)) * 100.0, 1) if total_conversion_attempts > 0 else 100.0
         
-        cursor.execute("""
+        cursor.execute(f"""
         SELECT 
-            COALESCE(conversion_type, 'unknown') as wf,
+            COALESCE(conversion_type, 'Standard Conversion') as wf,
             COUNT(*) as attempts,
-            SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END) as success_cnt
+            SUM(CASE WHEN status IN ('SUCCESS', 'completed') THEN 1 ELSE 0 END) as success_cnt
         FROM analytics_events
-        WHERE event_type IN ('conversion_attempt', 'conversion_result')
+        {date_clause if date_clause else 'WHERE 1=1'} AND event_type IN ('conversion_attempt', 'conversion_result')
         GROUP BY conversion_type;
         """)
         wf_rows = [dict(r) for r in cursor.fetchall()]
@@ -292,19 +389,20 @@ def get_dashboard_data() -> Dict[str, Any]:
             succ = r["success_cnt"] or 0
             rate = round((succ / max(1, att)) * 100.0, 1) if att > 0 else 0.0
             workflows.append({
-                "type": r["wf"],
-                "attempts": att,
+                "conversion_type": r["wf"],
+                "count": att,
                 "successful": succ,
                 "failed": att - succ,
+                "percentage": round((att / max(1, total_conversion_attempts)) * 100.0, 1) if total_conversion_attempts > 0 else 0.0,
                 "success_rate": rate
             })
             
-        cursor.execute("""
+        cursor.execute(f"""
         SELECT 
-            COALESCE(destination_template, 'Standard') as tmpl,
+            COALESCE(destination_template, 'Springer Journal') as tmpl,
             COUNT(*) as cnt
         FROM analytics_events
-        WHERE event_type = 'conversion_attempt'
+        {date_clause if date_clause else 'WHERE 1=1'} AND event_type IN ('conversion_attempt', 'conversion_result')
         GROUP BY destination_template;
         """)
         tmpl_rows = [dict(r) for r in cursor.fetchall()]
@@ -313,15 +411,15 @@ def get_dashboard_data() -> Dict[str, Any]:
             cnt = r["cnt"] or 0
             pct = round((cnt / max(1, total_conversion_attempts)) * 100.0, 1) if total_conversion_attempts > 0 else 0.0
             templates.append({
-                "template": r["tmpl"],
+                "template_name": r["tmpl"],
                 "count": cnt,
                 "percentage": pct
             })
             
-        cursor.execute("""
+        cursor.execute(f"""
         SELECT total_time_ms, upload_time_ms, conversion_time_ms
         FROM analytics_events
-        WHERE event_type = 'conversion_result' AND total_time_ms > 0
+        {date_clause if date_clause else 'WHERE 1=1'} AND event_type = 'conversion_result' AND total_time_ms > 0
         ORDER BY total_time_ms ASC;
         """)
         times_rows = [dict(r) for r in cursor.fetchall()]
@@ -346,9 +444,10 @@ def get_dashboard_data() -> Dict[str, Any]:
             "avg_upload_time_s": avg_upload_s
         }
         
-        cursor.execute("""
+        cursor.execute(f"""
         SELECT error_category, COUNT(*) as cnt
         FROM analytics_errors
+        {date_clause}
         GROUP BY error_category
         ORDER BY cnt DESC;
         """)
@@ -363,14 +462,14 @@ def get_dashboard_data() -> Dict[str, Any]:
                 "percentage": pct
             })
 
-        cursor.execute("""
+        cursor.execute(f"""
         SELECT 
             SUM(CASE WHEN validation_passed = 1 OR validation_passed = true THEN 1 ELSE 0 END) as val_pass,
             COUNT(validation_passed) as val_total,
             SUM(CASE WHEN compilation_passed = 1 OR compilation_passed = true THEN 1 ELSE 0 END) as comp_pass,
             COUNT(compilation_passed) as comp_total
         FROM analytics_events
-        WHERE event_type = 'conversion_result';
+        {date_clause if date_clause else 'WHERE 1=1'} AND event_type = 'conversion_result';
         """)
         q_row = dict(cursor.fetchone()) if cursor.rowcount != 0 else {}
         val_pass = q_row.get("val_pass") or 0
@@ -391,12 +490,13 @@ def get_dashboard_data() -> Dict[str, Any]:
             "overall_delivery_rate": success_rate_percent
         }
         
-        cursor.execute("""
+        cursor.execute(f"""
         SELECT 
             AVG(rating) as avg_rating,
             COUNT(*) as total_feedback,
             SUM(CASE WHEN is_useful = 1 OR is_useful = true THEN 1 ELSE 0 END) as useful_cnt
-        FROM analytics_feedback;
+        FROM analytics_feedback
+        {date_clause};
         """)
         fb_row = dict(cursor.fetchone()) if cursor.rowcount != 0 else {}
         avg_rating = round(fb_row.get("avg_rating") or 5.0, 1)
@@ -404,10 +504,10 @@ def get_dashboard_data() -> Dict[str, Any]:
         use_cnt = fb_row.get("useful_cnt") or 0
         useful_rate = round((use_cnt / max(1, tot_fb)) * 100.0, 1) if tot_fb > 0 else 100.0
         
-        cursor.execute("""
-        SELECT feedback_text, rating, conversion_type, created_at
+        cursor.execute(f"""
+        SELECT feedback_text, rating, is_useful, conversion_type, created_at
         FROM analytics_feedback
-        WHERE feedback_text IS NOT NULL AND LENGTH(feedback_text) > 2
+        {date_clause}
         ORDER BY feedback_id DESC
         LIMIT 10;
         """)
@@ -420,6 +520,24 @@ def get_dashboard_data() -> Dict[str, Any]:
             "recent_comments": comments
         }
         
+        # Build Factual Evidence-Backed Insights
+        insights = []
+        if workflows:
+            top_wf = max(workflows, key=lambda x: x["count"])
+            insights.append(f"Most used conversion workflow: {top_wf['conversion_type']} ({top_wf['count']} attempts)")
+        if templates:
+            top_tmpl = max(templates, key=lambda x: x["count"])
+            insights.append(f"Most popular target publisher template: {top_tmpl['template_name']} ({top_tmpl['count']} conversions)")
+        if performance["avg_processing_time_s"] > 0:
+            insights.append(f"Average conversion duration: {performance['avg_processing_time_s']} seconds (P95: {performance['p95_processing_time_s']}s)")
+        if total_conversion_attempts > 0:
+            insights.append(f"Conversion success rate: {success_rate_percent}% across {total_conversion_attempts} conversion attempts")
+        if error_categories:
+            top_err = error_categories[0]
+            insights.append(f"Most common error category: {top_err['category']} ({top_err['count']} occurrences)")
+        else:
+            insights.append("Zero conversion errors recorded in telemetry window.")
+
         conn.close()
         
         return {
@@ -438,7 +556,8 @@ def get_dashboard_data() -> Dict[str, Any]:
             "performance": performance,
             "error_categories": error_categories,
             "quality_indicators": quality_indicators,
-            "user_feedback": user_feedback
+            "user_feedback": user_feedback,
+            "insights": insights
         }
     except Exception as e:
         logger.warning(f"[ANALYTICS_GET_DASHBOARD_DATA_ERROR] {e}")
@@ -449,7 +568,8 @@ def get_dashboard_data() -> Dict[str, Any]:
             "performance": {"avg_processing_time_s": 0.0, "median_processing_time_s": 0.0, "p95_processing_time_s": 0.0, "avg_upload_time_s": 0.0},
             "error_categories": [],
             "quality_indicators": {"validation_pass_rate": 100.0, "compilation_pass_rate": 100.0, "overall_delivery_rate": 100.0},
-            "user_feedback": {"average_rating": 5.0, "total_responses": 0, "useful_percentage": 100.0, "recent_comments": []}
+            "user_feedback": {"average_rating": 5.0, "total_responses": 0, "useful_percentage": 100.0, "recent_comments": []},
+            "insights": ["Zero telemetry data recorded."]
         }
 
 try:

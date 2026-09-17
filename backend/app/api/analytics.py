@@ -119,10 +119,11 @@ def log_analytics_feedback(req: FeedbackRecordRequest, background_tasks: Backgro
 
 @router.post("/api/admin/login")
 def admin_login(req: AdminLoginRequest, response: Response):
-    """Admin login endpoint setting HTTP-only cookie and returning JWT token."""
-    if req.username.strip() == ADMIN_USERNAME and req.password.strip() == ADMIN_PASSWORD:
+    """Admin login endpoint setting HTTP-only cookie and returning JWT token after verifying PBKDF2 database hash."""
+    is_valid = analytics_db.verify_admin_db_credentials(req.username, req.password)
+    if is_valid:
         token = jwt.encode({
-            "username": ADMIN_USERNAME,
+            "username": req.username.strip(),
             "exp": time.time() + 28800 # 8 hours
         }, ADMIN_JWT_SECRET, algorithm="HS256")
         
@@ -134,7 +135,7 @@ def admin_login(req: AdminLoginRequest, response: Response):
             samesite="lax",
             max_age=28800
         )
-        return {"success": True, "token": token, "username": ADMIN_USERNAME}
+        return {"success": True, "token": token, "username": req.username.strip()}
     else:
         raise HTTPException(status_code=401, detail="Invalid admin username or password.")
 
@@ -148,7 +149,7 @@ def admin_logout(response: Response):
     return {"success": True}
 
 @router.get("/api/admin/analytics")
-def get_analytics_dashboard(username: str = Depends(verify_admin_auth)):
-    """Protected endpoint returning full aggregated dashboard metrics."""
-    data = analytics_db.get_dashboard_data()
+def get_analytics_dashboard(days: Optional[int] = None, username: str = Depends(verify_admin_auth)):
+    """Protected endpoint returning full aggregated dashboard metrics and factual insights."""
+    data = analytics_db.get_dashboard_data(days=days)
     return data
