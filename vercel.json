@@ -1,49 +1,42 @@
 {
   "buildCommand": "npm --prefix frontend run build",
   "outputDirectory": "frontend/dist",
-  "routes": [
+  "rewrites": [
     {
-      "src": "/api/upload-token(.*)",
-      "dest": "api/upload-token.js"
+      "source": "/api/upload-token(.*)",
+      "destination": "/api/upload-token.js"
     },
     {
-      "src": "/api/blob-upload-token(.*)",
-      "dest": "api/upload-token.js"
+      "source": "/api/blob-upload-token(.*)",
+      "destination": "/api/upload-token.js"
     },
     {
-      "src": "/api/blob-download(.*)",
-      "dest": "api/blob-download.js"
+      "source": "/api/blob-download(.*)",
+      "destination": "/api/blob-download.js"
     },
     {
-      "src": "/api/blob-delete(.*)",
-      "dest": "api/blob-delete.js"
+      "source": "/api/blob-delete(.*)",
+      "destination": "/api/blob-delete.js"
     },
     {
-      "src": "/api/blob-test(.*)",
-      "dest": "api/blob-test.js"
+      "source": "/api/blob-test(.*)",
+      "destination": "/api/blob-test.js"
     },
     {
-      "src": "/api/blob-diag(.*)",
-      "dest": "api/blob-diag.js"
+      "source": "/api/blob-diag(.*)",
+      "destination": "/api/blob-diag.js"
     },
     {
-      "src": "/api/(.*)",
-      "dest": "api/index.py"
+      "source": "/api/(.*)",
+      "destination": "/api/index.py"
     },
     {
-      "src": "/admin/(.*)",
-      "dest": "index.html"
+      "source": "/admin/(.*)",
+      "destination": "/index.html"
     },
     {
-      "src": "/admin",
-      "dest": "index.html"
-    },
-    {
-      "handle": "filesystem"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "index.html"
+      "source": "/admin",
+      "destination": "/index.html"
     }
   ],
   "crons": [
