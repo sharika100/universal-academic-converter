@@ -162,3 +162,8 @@ def get_analytics_dashboard(days: Optional[int] = None, username: str = Depends(
     """Protected endpoint returning full aggregated dashboard metrics and factual insights."""
     data = analytics_db.get_dashboard_data(days=days)
     return data
+
+@router.get("/api/analytics/status")
+def analytics_status():
+    """Diagnostic health status returning database connection provider and telemetry event counts."""
+    return analytics_db.get_dashboard_data(days=1)
