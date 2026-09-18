@@ -119,7 +119,11 @@ async def normalize_vercel_path(request: Request, call_next):
             break
 
     if not clean_path:
-        logger.info(f"[PATH_RECOVERY_DEBUG] raw_path='{raw_path}', headers={dict(request.headers)}")
+        qp_path = request.query_params.get("__path__") or request.query_params.get("path")
+        if qp_path:
+            clean_path = qp_path if qp_path.startswith("/api") else f"/api/{qp_path.lstrip('/')}"
+
+    if not clean_path:
         for hdr_name in ["x-forwarded-uri", "x-original-uri", "x-invoke-path", "x-pathname", "x-envoy-original-path", "x-matched-path", "x-now-route-matches", "x-vercel-rewrite"]:
             hdr_val = request.headers.get(hdr_name)
             if hdr_val and not (hdr_val.startswith("/api/index.py") or hdr_val.startswith("/api/index")):
@@ -166,7 +170,19 @@ async def normalize_vercel_path(request: Request, call_next):
             logger.warning(f"Path recovery payload inspection warning: {payload_err}")
 
     if not clean_path and request.method == "GET":
-        clean_path = "/api/health"
+        url_str = str(request.url)
+        referer = request.headers.get("referer", "")
+        fwd_uri = request.headers.get("x-forwarded-uri", "")
+        for candidate in [url_str, fwd_uri, referer]:
+            if "/api/book/download/" in candidate:
+                parts = candidate.split("/api/book/download/")
+                if len(parts) > 1:
+                    job_part = parts[1].split("?")[0].split("#")[0]
+                    clean_path = f"/api/book/download/{job_part}"
+                    break
+
+        if not clean_path:
+            clean_path = "/api/health"
 
     final_path = clean_path if clean_path else "/"
     logger.info(f"[PATH_RECOVERED] Resolved scope path: '{final_path}' (original raw_path: '{raw_path}')")
