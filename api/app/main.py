@@ -1,4 +1,5 @@
 import os
+import json
 import uuid
 import shutil
 import tempfile
@@ -141,15 +142,9 @@ async def normalize_vercel_path(request: Request, call_next):
                 try:
                     data = json.loads(body_bytes.decode("utf-8"))
                 except Exception:
-                    body_str = body_bytes.decode("utf-8", errors="ignore")
-                    if "job_id=" in body_str and ("udm_json_str=" in body_str or "spec_json_str=" in body_str):
-                        clean_path = "/api/book/convert"
-                    elif "job_id=" in body_str:
-                        clean_path = "/api/book/analyze-template"
-                    else:
-                        clean_path = "/api/book/analyze-source"
+                    data = {}
 
-            if isinstance(data, dict):
+            if isinstance(data, dict) and data:
                 if "blob_url" in data:
                     if "job_id" in data:
                         clean_path = "/api/book/analyze-template-from-storage"
@@ -161,6 +156,14 @@ async def normalize_vercel_path(request: Request, call_next):
                     clean_path = "/api/book/convert"
                 elif "job_id" in data:
                     clean_path = "/api/book/analyze-template"
+            elif body_bytes:
+                body_str = body_bytes.decode("utf-8", errors="ignore")
+                if "job_id=" in body_str and ("udm_json_str=" in body_str or "spec_json_str=" in body_str):
+                    clean_path = "/api/book/convert"
+                elif "job_id=" in body_str:
+                    clean_path = "/api/book/analyze-template"
+                else:
+                    clean_path = "/api/book/analyze-source"
         except Exception as payload_err:
             logger.warning(f"Path recovery payload inspection warning: {payload_err}")
 
@@ -168,6 +171,7 @@ async def normalize_vercel_path(request: Request, call_next):
         clean_path = "/api/health"
 
     final_path = clean_path if clean_path else "/"
+    logger.info(f"[PATH_RECOVERED] Resolved scope path: '{final_path}' (original raw_path: '{raw_path}')")
     request.scope["path"] = final_path
     request.scope["raw_path"] = final_path.encode("utf-8")
     return await call_next(request)
