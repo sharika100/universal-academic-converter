@@ -214,6 +214,16 @@ def health_check():
         "blob_storage_enabled": blob_token_present
     }
 
+@app.api_route("/api/debug-path", methods=["GET", "POST"])
+@app.api_route("/debug-path", methods=["GET", "POST"])
+async def debug_path(request: Request):
+    return {
+        "path": request.scope.get("path"),
+        "raw_path": request.scope.get("raw_path", "").decode("utf-8") if isinstance(request.scope.get("raw_path"), bytes) else str(request.scope.get("raw_path")),
+        "headers": dict(request.headers),
+        "scope_keys": list(request.scope.keys())
+    }
+
 @app.get("/api/presets")
 @app.get("/presets")
 def get_presets():
