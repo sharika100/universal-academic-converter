@@ -443,6 +443,22 @@ async def convert_book(
             output_zip_path=zip_out_path
         )
 
+        zip_pathname = f"converted_books/{job_id}_converted_book.zip"
+        zip_blob_url = None
+        zip_download_url = None
+        if os.path.exists(zip_out_path):
+            try:
+                with open(zip_out_path, "rb") as zfh:
+                    zcontent = zfh.read()
+                zblob = put_blob_bytes(zip_pathname, zcontent, content_type="application/zip")
+                if zblob:
+                    zip_blob_url = zblob.get("url")
+                    zip_download_url = zblob.get("downloadUrl")
+                    if zblob.get("pathname"):
+                        zip_pathname = zblob.get("pathname")
+            except Exception as zerr:
+                logger.warning(f"Failed to persist converted_book.zip to Blob storage: {zerr}")
+
         pdf_compiled = False
         try:
             PdfPreviewGenerator.generate_pdf(udm, pdf_out_path)
@@ -487,6 +503,9 @@ async def convert_book(
             "job_id": job_id,
             "status": "SUCCESS",
             "report": report.model_dump(),
+            "zip_blob_url": zip_blob_url,
+            "zip_download_url": zip_download_url,
+            "zip_pathname": zip_pathname,
             "mapping": {
                 "chapters_source": len(udm.sections),
                 "authors_source": len(udm.metadata.authors),
@@ -511,11 +530,19 @@ async def download_book_zip(job_id: str):
     job_dir = os.path.join(TEMP_STORAGE, job_id)
     zip_path = os.path.join(job_dir, "converted_book.zip")
 
-    if not os.path.exists(zip_path):
+    zip_bytes = None
+    if os.path.exists(zip_path):
+        with open(zip_path, "rb") as fh:
+            zip_bytes = fh.read()
+    else:
+        blob_pathname = f"converted_books/{job_id}_converted_book.zip"
+        zip_bytes = fetch_blob_bytes(blob_url=blob_pathname, pathname=blob_pathname)
+
+    if not zip_bytes:
         raise HTTPException(status_code=404, detail="Requested book download file not found.")
 
-    return FileResponse(
-        zip_path,
+    return Response(
+        content=zip_bytes,
         media_type="application/zip",
-        filename="converted_academic_book.zip"
+        headers={"Content-Disposition": 'attachment; filename="converted_academic_book.zip"'}
     )

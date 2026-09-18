@@ -119,16 +119,11 @@ async def normalize_vercel_path(request: Request, call_next):
             break
 
     if not clean_path:
-        hdr_path = (
-            request.headers.get("x-matched-path") or
-            request.headers.get("x-forwarded-uri") or
-            request.headers.get("x-envoy-original-path") or
-            request.headers.get("x-now-route-matches") or
-            request.headers.get("x-vercel-rewrite") or
-            request.headers.get("x-original-uri")
-        )
-        if hdr_path and not (hdr_path.startswith("/api/index.py") or hdr_path.startswith("/api/index")):
-            clean_path = hdr_path.split("?")[0]
+        for hdr_name in ["x-forwarded-uri", "x-original-uri", "x-envoy-original-path", "x-matched-path", "x-now-route-matches", "x-vercel-rewrite"]:
+            hdr_val = request.headers.get(hdr_name)
+            if hdr_val and not (hdr_val.startswith("/api/index.py") or hdr_val.startswith("/api/index")):
+                clean_path = hdr_val.split("?")[0]
+                break
 
     if not clean_path and request.method == "POST":
         try:
