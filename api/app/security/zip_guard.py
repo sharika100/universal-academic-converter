@@ -38,3 +38,5 @@ class ZipGuard:
                     file_tree.append(filename.replace('\\', '/'))
                     
         return file_tree, warnings
+
+    safe_extract = inspect_and_extract_safe
