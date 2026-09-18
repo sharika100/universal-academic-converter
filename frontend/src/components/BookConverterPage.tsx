@@ -1,5 +1,13 @@
 import React, { useState } from 'react';
+import { upload } from '@vercel/blob/client';
 import { BookOpen, Upload, CheckCircle2, Download, AlertCircle, FileText, ArrowRight, RefreshCw, ShieldCheck } from 'lucide-react';
+
+async function calculateSHA256(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 export const BookConverterPage: React.FC = () => {
   const [sourceFile, setSourceFile] = useState<File | null>(null);
@@ -40,30 +48,204 @@ export const BookConverterPage: React.FC = () => {
     setErrorMessage(null);
     setStatusMessage("1/3 Analyzing source manuscript...");
 
+    const LARGE_FILE_THRESHOLD = 3.5 * 1024 * 1024; // 3.5 MB threshold below Vercel 4.5 MB limit
+    let currentJobId = jobId || `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
     try {
       // 1. Analyze Source
-      const srcData = new FormData();
-      srcData.append('file', sourceFile);
-      const srcRes = await fetch('/api/book/analyze-source', { method: 'POST', body: srcData });
+      let srcRes: Response;
+
+      if (sourceFile.size > LARGE_FILE_THRESHOLD) {
+        setStatusMessage("1/3 Uploading large manuscript to secure storage...");
+        console.log(`Book source file size (${(sourceFile.size / 1024 / 1024).toFixed(2)} MB) exceeds 3.5 MB threshold. Uploading directly to Vercel Blob...`);
+        try {
+          const srcHash = await calculateSHA256(sourceFile);
+          let finalBlobUrl = '';
+          let finalPathname = '';
+          let downloadUrl = '';
+
+          try {
+            const blob = await upload(sourceFile.name, sourceFile, {
+              access: 'private',
+              handleUploadUrl: '/api/upload-token',
+              contentType: sourceFile.type || 'application/octet-stream'
+            });
+            finalBlobUrl = blob.url;
+            finalPathname = blob.pathname;
+            downloadUrl = (blob as any).downloadUrl || blob.url;
+          } catch (sdkErr: any) {
+            console.warn("Client SDK upload failed, attempting presigned PUT fallback:", sdkErr?.message || sdkErr);
+            const authRes = await fetch('/api/upload-token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                filename: sourceFile.name,
+                contentType: sourceFile.type || 'application/octet-stream'
+              })
+            });
+
+            if (!authRes.ok) {
+              const errJson = await authRes.json().catch(() => ({}));
+              throw new Error(errJson.detail || errJson.message || `Storage authorization failed (HTTP ${authRes.status})`);
+            }
+
+            const authData = await authRes.json();
+            finalBlobUrl = authData.blobUrl;
+            finalPathname = authData.pathname;
+            downloadUrl = authData.downloadUrl;
+
+            if (authData.uploadUrl) {
+              const putRes = await fetch(authData.uploadUrl, {
+                method: 'PUT',
+                body: sourceFile
+              });
+
+              if (!putRes.ok) {
+                const putText = await putRes.text().catch(() => '');
+                throw new Error(`Direct storage upload failed (HTTP ${putRes.status}): ${putText || 'Storage PUT rejected'}`);
+              }
+
+              let putData: any = null;
+              try { putData = JSON.parse(await putRes.text()); } catch {}
+              if (putData?.url) finalBlobUrl = putData.url;
+              if (putData?.pathname) finalPathname = putData.pathname;
+            }
+          }
+
+          setStatusMessage("1/3 Analyzing source manuscript from storage...");
+          srcRes = await fetch('/api/book/analyze-source-from-storage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              upload_id: currentJobId,
+              blob_url: finalBlobUrl,
+              download_url: downloadUrl,
+              pathname: finalPathname,
+              filename: sourceFile.name,
+              sha256: srcHash
+            })
+          });
+        } catch (uploadErr: any) {
+          console.error("Direct Vercel Blob upload failed:", uploadErr);
+          throw new Error(uploadErr.message || "Direct storage upload failed for large manuscript file.");
+        }
+      } else {
+        const srcData = new FormData();
+        srcData.append('file', sourceFile);
+        srcRes = await fetch('/api/book/analyze-source', { method: 'POST', body: srcData });
+      }
 
       if (!srcRes.ok) {
-        const errJson = await srcRes.json().catch(() => ({}));
-        throw new Error(errJson.detail || `Source analysis failed (HTTP ${srcRes.status})`);
+        let errDetail = `Server returned HTTP ${srcRes.status} error during source analysis.`;
+        if (srcRes.status === 413) {
+          errDetail = `Source manuscript file size (${(sourceFile.size / 1024 / 1024).toFixed(2)} MB) exceeded function payload limit. Direct storage upload was attempted.`;
+        } else {
+          try {
+            const errJson = await srcRes.json();
+            errDetail = errJson.detail || errJson.message || errDetail;
+          } catch {
+            const text = await srcRes.text().catch(() => '');
+            if (text) errDetail = text.slice(0, 200);
+          }
+        }
+        throw new Error(errDetail);
       }
       const srcJson = await srcRes.json();
+      currentJobId = srcJson.job_id;
       setJobId(srcJson.job_id);
       setSourceUdm(srcJson.udm);
 
       // 2. Analyze Template
       setStatusMessage("2/3 Analyzing target book template...");
-      const tmplData = new FormData();
-      tmplData.append('file', destFile);
-      tmplData.append('job_id', srcJson.job_id);
-      const tmplRes = await fetch('/api/book/analyze-template', { method: 'POST', body: tmplData });
+      let tmplRes: Response;
+
+      if (destFile.size > LARGE_FILE_THRESHOLD) {
+        try {
+          const destHash = await calculateSHA256(destFile);
+          let finalBlobUrl = '';
+          let finalPathname = '';
+          let downloadUrl = '';
+
+          try {
+            const blob = await upload(destFile.name, destFile, {
+              access: 'private',
+              handleUploadUrl: '/api/upload-token',
+              contentType: destFile.type || 'application/octet-stream'
+            });
+            finalBlobUrl = blob.url;
+            finalPathname = blob.pathname;
+            downloadUrl = (blob as any).downloadUrl || blob.url;
+          } catch (sdkErr: any) {
+            const authRes = await fetch('/api/upload-token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                filename: destFile.name,
+                contentType: destFile.type || 'application/octet-stream'
+              })
+            });
+
+            if (!authRes.ok) {
+              const errJson = await authRes.json().catch(() => ({}));
+              throw new Error(errJson.detail || errJson.message || `Storage authorization failed (HTTP ${authRes.status})`);
+            }
+
+            const authData = await authRes.json();
+            finalBlobUrl = authData.blobUrl;
+            finalPathname = authData.pathname;
+            downloadUrl = authData.downloadUrl;
+
+            if (authData.uploadUrl) {
+              const putRes = await fetch(authData.uploadUrl, {
+                method: 'PUT',
+                body: destFile
+              });
+
+              if (!putRes.ok) {
+                const putText = await putRes.text().catch(() => '');
+                throw new Error(`Direct template storage upload failed with HTTP status ${putRes.status}: ${putText}`);
+              }
+
+              let putData: any = null;
+              try { putData = JSON.parse(await putRes.text()); } catch {}
+              if (putData?.url) finalBlobUrl = putData.url;
+              if (putData?.pathname) finalPathname = putData.pathname;
+            }
+          }
+
+          tmplRes = await fetch('/api/book/analyze-template-from-storage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              job_id: currentJobId,
+              blob_url: finalBlobUrl,
+              download_url: downloadUrl,
+              pathname: finalPathname,
+              filename: destFile.name,
+              sha256: destHash
+            })
+          });
+        } catch (destUploadErr: any) {
+          console.error("Direct storage template upload failed:", destUploadErr);
+          throw new Error(destUploadErr.message || "Direct storage upload failed for template file.");
+        }
+      } else {
+        const tmplData = new FormData();
+        tmplData.append('file', destFile);
+        tmplData.append('job_id', currentJobId);
+        tmplRes = await fetch('/api/book/analyze-template', { method: 'POST', body: tmplData });
+      }
 
       if (!tmplRes.ok) {
-        const errJson = await tmplRes.json().catch(() => ({}));
-        throw new Error(errJson.detail || `Book template analysis failed (HTTP ${tmplRes.status})`);
+        let errDetail = `Server returned HTTP ${tmplRes.status} error during template analysis.`;
+        try {
+          const errJson = await tmplRes.json();
+          errDetail = errJson.detail || errJson.message || errDetail;
+        } catch {
+          const text = await tmplRes.text().catch(() => '');
+          if (text) errDetail = text.slice(0, 200);
+        }
+        throw new Error(errDetail);
       }
       const tmplJson = await tmplRes.json();
       setDestSpec(tmplJson.spec);
@@ -74,15 +256,22 @@ export const BookConverterPage: React.FC = () => {
       setStatusMessage("3/3 Rendering book project & compiling chapters...");
 
       const convData = new FormData();
-      convData.append('job_id', srcJson.job_id);
+      convData.append('job_id', currentJobId);
       convData.append('udm_json_str', JSON.stringify(srcJson.udm));
       convData.append('spec_json_str', JSON.stringify(tmplJson.spec));
 
       const convRes = await fetch('/api/book/convert', { method: 'POST', body: convData });
 
       if (!convRes.ok) {
-        const errJson = await convRes.json().catch(() => ({}));
-        throw new Error(errJson.detail || `Book conversion failed (HTTP ${convRes.status})`);
+        let errDetail = `Book conversion failed (HTTP ${convRes.status})`;
+        try {
+          const errJson = await convRes.json();
+          errDetail = errJson.detail || errJson.message || errDetail;
+        } catch {
+          const text = await convRes.text().catch(() => '');
+          if (text) errDetail = text.slice(0, 200);
+        }
+        throw new Error(errDetail);
       }
 
       const convJson = await convRes.json();

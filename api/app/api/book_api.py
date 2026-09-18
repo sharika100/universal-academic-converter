@@ -5,6 +5,9 @@ import tempfile
 import zipfile
 import json
 import logging
+import requests
+import urllib.parse
+import hashlib
 from typing import Optional, Dict, Any
 from pydantic import BaseModel
 from fastapi import APIRouter, File, UploadFile, Form, HTTPException, Request
@@ -29,10 +32,95 @@ router = APIRouter(prefix="/api/book", tags=["Book Converter"])
 TEMP_STORAGE = os.path.join(tempfile.gettempdir(), "book_converter_storage")
 os.makedirs(TEMP_STORAGE, exist_ok=True)
 
+def get_blob_read_write_token() -> Optional[str]:
+    token = os.environ.get("BLOB_READ_WRITE_TOKEN")
+    if token:
+        return token
+    for k, v in os.environ.items():
+        if (k.endswith("_READ_WRITE_TOKEN") or "BLOB" in k) and isinstance(v, str) and v.startswith("vercel_blob_"):
+            return v
+    return None
+
+def trigger_blob_cleanup(blob_url: Optional[str], pathname: Optional[str] = None):
+    if not blob_url and not pathname:
+        return
+    try:
+        host_url = os.environ.get("VERCEL_PROJECT_PRODUCTION_URL") or os.environ.get("VERCEL_URL")
+        if host_url:
+            if not host_url.startswith("http"):
+                host_url = f"https://{host_url}"
+            delete_endpoint = f"{host_url}/api/blob-delete"
+        else:
+            delete_endpoint = "http://127.0.0.1:3000/api/blob-delete"
+
+        token = get_blob_read_write_token()
+        headers = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+            headers["x-internal-delete-key"] = token[-16:]
+
+        requests.post(
+            delete_endpoint,
+            json={"url": blob_url, "pathname": pathname},
+            headers=headers,
+            timeout=10
+        )
+    except Exception as del_err:
+        logger.warning(f"[TEMPORARY_BLOB_CLEANUP_WARNING] Failed to trigger Blob deletion: {del_err}")
+
+def fetch_blob_bytes(blob_url: str, download_url: Optional[str] = None, pathname: Optional[str] = None) -> Optional[bytes]:
+    if not blob_url:
+        return None
+    if os.path.exists(blob_url):
+        with open(blob_url, "rb") as fh:
+            return fh.read()
+    
+    headers = {}
+    token = get_blob_read_write_token()
+    if token and not download_url:
+        headers["Authorization"] = f"Bearer {token}"
+    
+    fetch_url = download_url if download_url else blob_url
+    try:
+        resp = requests.get(fetch_url, headers=headers, timeout=60)
+        if resp.status_code in (401, 403, 404):
+            host_url = os.environ.get("VERCEL_PROJECT_PRODUCTION_URL") or os.environ.get("VERCEL_URL")
+            if host_url:
+                if not host_url.startswith("http"):
+                    host_url = f"https://{host_url}"
+                helper_url = f"{host_url}/api/blob-download?url={urllib.parse.quote(blob_url, safe='')}"
+            else:
+                helper_url = f"http://127.0.0.1:3000/api/blob-download?url={urllib.parse.quote(blob_url, safe='')}"
+            resp_helper = requests.get(helper_url, timeout=60)
+            if resp_helper.status_code == 200 and len(resp_helper.content) > 0:
+                return resp_helper.content
+        if resp.status_code == 200:
+            return resp.content
+    except Exception as e:
+        logger.error(f"Blob retrieval error: {e}")
+    return None
+
 class BookConvertRequest(BaseModel):
     job_id: str
     udm: Optional[Dict[str, Any]] = None
     spec: Optional[Dict[str, Any]] = None
+
+class BookStorageAnalysisRequest(BaseModel):
+    upload_id: Optional[str] = None
+    blob_url: str
+    download_url: Optional[str] = None
+    pathname: Optional[str] = None
+    filename: Optional[str] = None
+    sha256: Optional[str] = None
+
+class BookTemplateStorageAnalysisRequest(BaseModel):
+    job_id: str
+    upload_id: Optional[str] = None
+    blob_url: str
+    download_url: Optional[str] = None
+    pathname: Optional[str] = None
+    filename: Optional[str] = None
+    sha256: Optional[str] = None
 
 @router.post("/analyze-source")
 async def analyze_book_source(
@@ -73,6 +161,95 @@ async def analyze_book_source(
     except Exception as e:
         logger.error(f"Book source analysis failed: {e}")
         raise HTTPException(status_code=500, detail=f"Source analysis failed: {str(e)}")
+
+@router.post("/analyze-source-from-storage")
+async def analyze_book_source_from_storage(req: BookStorageAnalysisRequest):
+    job_id = req.upload_id if req.upload_id else str(uuid.uuid4())
+    job_dir = os.path.join(TEMP_STORAGE, job_id)
+    os.makedirs(job_dir, exist_ok=True)
+
+    filename = req.filename or "manuscript.docx"
+    file_path = os.path.join(job_dir, f"source_{filename}")
+
+    content = fetch_blob_bytes(req.blob_url, req.download_url, req.pathname)
+    if not content:
+        trigger_blob_cleanup(req.blob_url, req.pathname)
+        raise HTTPException(status_code=400, detail="Failed to retrieve manuscript from Blob storage.")
+
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    trigger_blob_cleanup(req.blob_url, req.pathname)
+
+    try:
+        if filename.endswith(".docx"):
+            udm = DocxParser.parse(file_path)
+            file_tree = [{"name": filename, "type": "file"}]
+        elif filename.endswith(".zip"):
+            extracted_dir = os.path.join(job_dir, "extracted_src")
+            ZipGuard.safe_extract(file_path, extracted_dir)
+            udm = LatexParser.parse_project(extracted_dir)
+            file_tree = build_directory_tree(extracted_dir)
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported manuscript format. Use .docx or .zip")
+
+        udm_json_path = os.path.join(job_dir, "source_udm.json")
+        with open(udm_json_path, "w", encoding="utf-8") as fh:
+            fh.write(udm.model_dump_json())
+
+        return JSONResponse({
+            "job_id": job_id,
+            "status": "SUCCESS",
+            "udm": udm.model_dump(),
+            "file_tree": file_tree
+        })
+    except Exception as e:
+        logger.error(f"Book storage source analysis failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Source analysis failed: {str(e)}")
+
+@router.post("/analyze-template-from-storage")
+async def analyze_book_template_from_storage(req: BookTemplateStorageAnalysisRequest):
+    job_dir = os.path.join(TEMP_STORAGE, req.job_id)
+    os.makedirs(job_dir, exist_ok=True)
+
+    filename = req.filename or "template.zip"
+    file_path = os.path.join(job_dir, f"template_{filename}")
+
+    content = fetch_blob_bytes(req.blob_url, req.download_url, req.pathname)
+    if not content:
+        trigger_blob_cleanup(req.blob_url, req.pathname)
+        raise HTTPException(status_code=400, detail="Failed to retrieve template from Blob storage.")
+
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    trigger_blob_cleanup(req.blob_url, req.pathname)
+
+    try:
+        if filename.endswith(".zip"):
+            tmpl_extracted_dir = os.path.join(job_dir, "extracted_tmpl")
+            ZipGuard.safe_extract(file_path, tmpl_extracted_dir)
+            spec = BookTemplateAnalyzer.analyze_book_template(tmpl_extracted_dir)
+            file_tree = build_directory_tree(tmpl_extracted_dir)
+        elif filename.endswith(".docx"):
+            spec = BookTemplateAnalyzer.analyze_book_template(file_path)
+            file_tree = [{"name": filename, "type": "file"}]
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported template format. Use .zip or .docx")
+
+        spec_json_path = os.path.join(job_dir, "template_spec.json")
+        with open(spec_json_path, "w", encoding="utf-8") as fh:
+            fh.write(spec.model_dump_json())
+
+        return JSONResponse({
+            "job_id": req.job_id,
+            "status": "SUCCESS",
+            "spec": spec.model_dump(),
+            "file_tree": file_tree
+        })
+    except Exception as e:
+        logger.error(f"Book storage template analysis failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Template analysis failed: {str(e)}")
 
 @router.post("/analyze-template")
 async def analyze_book_template(
