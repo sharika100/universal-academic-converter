@@ -119,7 +119,8 @@ async def normalize_vercel_path(request: Request, call_next):
             break
 
     if not clean_path:
-        for hdr_name in ["x-forwarded-uri", "x-original-uri", "x-envoy-original-path", "x-matched-path", "x-now-route-matches", "x-vercel-rewrite"]:
+        logger.info(f"[PATH_RECOVERY_DEBUG] raw_path='{raw_path}', headers={dict(request.headers)}")
+        for hdr_name in ["x-forwarded-uri", "x-original-uri", "x-invoke-path", "x-pathname", "x-envoy-original-path", "x-matched-path", "x-now-route-matches", "x-vercel-rewrite"]:
             hdr_val = request.headers.get(hdr_name)
             if hdr_val and not (hdr_val.startswith("/api/index.py") or hdr_val.startswith("/api/index")):
                 clean_path = hdr_val.split("?")[0]
