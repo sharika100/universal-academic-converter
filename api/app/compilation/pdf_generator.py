@@ -162,15 +162,15 @@ class PdfPreviewGenerator:
                             story.append(RLImage(tmp_f.name, width=320, height=180))
                         except Exception:
                             pass
-                    story.append(Paragraph(f"Figure: {blk.get('caption', '')}", cap_style))
+                    story.append(Paragraph(f"Figure: {safe_xml(blk.get('caption', ''))}", cap_style))
                 elif btype == "table":
                     headers = blk.get("headers", [])
                     rows = blk.get("rows", [])
                     table_data = []
                     if headers:
-                        table_data.append([Paragraph(f"<b>{h}</b>", body_style) for h in headers])
+                        table_data.append([Paragraph(f"<b>{safe_xml(h)}</b>", body_style) for h in headers])
                     for r in rows:
-                        table_data.append([Paragraph(str(cell), body_style) for cell in r])
+                        table_data.append([Paragraph(safe_xml(str(cell)), body_style) for cell in r])
                         
                     if table_data:
                         t = RLTable(table_data)
@@ -183,14 +183,14 @@ class PdfPreviewGenerator:
                             ('BOTTOMPADDING', (0,0), (-1,-1), 4),
                         ]))
                         story.append(t)
-                        story.append(Paragraph(f"Table: {blk.get('caption', '')}", cap_style))
+                        story.append(Paragraph(f"Table: {safe_xml(blk.get('caption', ''))}", cap_style))
                         
         # References
         if udm.references:
             story.append(Paragraph("References", h1_style))
             for idx, ref in enumerate(udm.references):
                 authors_str = ", ".join(ref.authors) if ref.authors else ""
-                ref_text = f"[{idx+1}] {authors_str}. <i>{ref.title}</i>. {ref.journal or ''} ({ref.year or ''})."
+                ref_text = f"[{idx+1}] {safe_xml(authors_str)}. <i>{safe_xml(ref.title)}</i>. {safe_xml(ref.journal or '')} ({safe_xml(ref.year or '')})."
                 story.append(Paragraph(ref_text, body_style))
                 
         doc.build(story)

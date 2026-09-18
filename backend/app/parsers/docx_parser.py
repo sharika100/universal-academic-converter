@@ -118,9 +118,19 @@ class DocxParser:
         for lv in label_values:
             udm.metadata.fields[lv.label] = lv.value
 
+        # Check if document has explicit chapter keywords anywhere
+        doc_has_explicit_chapters = False
+        for elem in body_elements:
+            if isinstance(elem, CT_P):
+                p_txt = elem.text.strip() if elem.text else ""
+                if re.match(r'^(CHAPTER|UNIT|MODULE)\b', p_txt, re.I):
+                    doc_has_explicit_chapters = True
+                    break
+
         # 3. Iterate body elements sequentially
         sections = []
-        current_section = Section(title="Main Content", level=1, blocks=[])
+        init_title = udm.metadata.title if udm.metadata.title and re.match(r'^(PREFACE|FOREWORD|ACKNOWLEDGEM?ENTS|INTRODUCTION|CHAPTER|UNIT|MODULE)\b', udm.metadata.title, re.I) else "Main Content"
+        current_section = Section(title=init_title, level=1, blocks=[])
         
         abstract_found = False
         references_found = False
@@ -234,17 +244,35 @@ class DocxParser:
                 
             # Headings Detection
             is_heading = False
-            heading_level = 1
+            heading_level = 2
             clean_title = text
             
             is_bullet_symbol = bool(re.match(r'^[•\-\*\u2022\u2013\u2014]\s*', text))
             is_all_bold = bool(p.runs) and any(r.text.strip() for r in p.runs) and all(r.bold for r in p.runs if r.text.strip())
 
+            is_chap_keyword = bool(re.match(r'^(CHAPTER|UNIT|MODULE|PREFACE|FOREWORD|ACKNOWLEDGEM?ENTS|APPENDIX|REFERENCES?)\b', text, re.I))
+
             m_lvl1 = re.match(r'^(?:\d+|[IVXLCDM]+)\.\s+([A-Za-z].*)$', text)
             m_lvl2 = re.match(r'^[A-Z]\.\s+([A-Za-z].*)$', text)
             m_lvl3 = re.match(r'^\d+\.\d+\.\s+([A-Za-z].*)$', text)
             
-            if m_lvl3:
+            if is_chap_keyword:
+                is_heading = True
+                heading_level = 1
+                clean_title = text
+            elif style_name == "heading 1":
+                is_heading = True
+                heading_level = 1 if not doc_has_explicit_chapters else 2
+                clean_title = text.rstrip(":").strip()
+            elif style_name == "heading 2":
+                is_heading = True
+                heading_level = 2
+                clean_title = text
+            elif style_name in ["heading 3", "heading 4"]:
+                is_heading = True
+                heading_level = 3
+                clean_title = text
+            elif m_lvl3:
                 is_heading = True
                 heading_level = 3
                 clean_title = m_lvl3.group(1).strip()
@@ -254,42 +282,41 @@ class DocxParser:
                 clean_title = m_lvl2.group(1).strip()
             elif m_lvl1:
                 is_heading = True
-                heading_level = 1
+                heading_level = 2 if doc_has_explicit_chapters else 1
                 clean_title = m_lvl1.group(1).strip()
-            elif "heading 1" in style_name:
-                is_heading = True
-                heading_level = 1
-                clean_title = text.rstrip(":").strip()
-            elif "heading 2" in style_name:
-                is_heading = True
-                heading_level = 2
-                clean_title = text
-            elif "heading 3" in style_name:
-                is_heading = True
-                heading_level = 3
-                clean_title = text
             elif ("heading" in style_name or (is_all_bold and len(text) < 85 and not is_bullet_symbol and not text.endswith(".") and not text.endswith(":"))):
                 is_heading = True
-                heading_level = 1
+                heading_level = 1 if not doc_has_explicit_chapters else 3
                 clean_title = text
                 
             if is_heading:
                 if is_reference_section_heading(clean_title):
                     references_found = True
-                    if current_section and current_section.blocks:
+                    if current_section and (current_section.blocks or current_section.title):
                         sections.append(current_section)
-                        current_section = Section(title="", level=1, blocks=[])
+                        current_section = Section(title=clean_title, level=1, blocks=[])
+                    else:
+                        current_section.title = clean_title
+                        current_section.level = 1
                     return
                 if references_found and not is_reference_section_heading(clean_title):
                     references_found = False
 
+                # Handle sequential chapter label + subtitle merging (e.g. CHAPTER 1 followed immediately by BASIC CONCEPTS OF DATA STRUCTURES)
+                if current_section and current_section.level == 1 and not current_section.blocks and (heading_level == 2 or style_name == "heading 2"):
+                    current_section.title = f"{current_section.title}: {clean_title}"
+                    return
+
                 if not first_heading_found:
                     first_heading_found = True
-                    if not current_section.blocks or current_section.title.lower() in ["introduction", "main content"]:
+                    if current_section.blocks and current_section.title.lower() in ["introduction", "main content"]:
+                        sections.append(current_section)
+                        current_section = Section(title=clean_title, level=heading_level, blocks=[])
+                    else:
                         current_section.title = clean_title
                         current_section.level = heading_level
-                        return
-                if current_section.blocks:
+                    return
+                if current_section.blocks or current_section.title:
                     sections.append(current_section)
                 current_section = Section(title=clean_title, level=heading_level, blocks=[])
                 return
@@ -405,7 +432,7 @@ class DocxParser:
                 )
                 current_section.blocks.append(tbl_obj.model_dump())
                 
-        if current_section.blocks:
+        if current_section.blocks or current_section.title:
             sections.append(current_section)
             
         udm.sections = sections if sections else [Section(title="Main Content", level=1, blocks=[Paragraph(text="Content extracted").model_dump()])]

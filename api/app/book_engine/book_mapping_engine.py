@@ -4,15 +4,86 @@ from app.models.udm import UniversalDocumentModel, Section, Paragraph, Figure, T
 from app.book_engine.book_template_analyzer import BookTemplateSpecification
 from app.book_engine.image_converter import get_latex_compatible_filename
 
+UNICODE_LATEX_MAP = {
+    '\u00a0': '~',
+    '\u200b': '',
+    '±': r'\pm',
+    '×': r'\times',
+    '÷': r'\div',
+    '°': r'^\circ',
+    '—': r'---',
+    '–': r'--',
+    '…': r'\dots ',
+    '“': r'``',
+    '”': r"''",
+    '‘': r'`',
+    '’': r"'",
+    '•': r'\textbullet ',
+    '↔': r'\leftrightarrow',
+    '→': r'\rightarrow',
+    '←': r'\leftarrow',
+    '⇒': r'\Rightarrow',
+    '⇐': r'\Leftarrow',
+    '⇔': r'\Leftrightarrow',
+    '≤': r'\le',
+    '≥': r'\ge',
+    '≠': r'\neq',
+    '−': r'-',
+    '√': r'\sqrt{}',
+    'α': r'\alpha',
+    'β': r'\beta',
+    'γ': r'\gamma',
+    'δ': r'\delta',
+    'ε': r'\epsilon',
+    'θ': r'\theta',
+    'Θ': r'\Theta',
+    'λ': r'\lambda',
+    'μ': r'\mu',
+    'π': r'\pi',
+    'σ': r'\sigma',
+    'τ': r'\tau',
+    'φ': r'\phi',
+    'ω': r'\omega',
+    'Δ': r'\Delta',
+    'Σ': r'\Sigma',
+    'Ω': r'\Omega',
+}
+
+MATH_CMDS = {
+    r'\leftrightarrow', r'\rightarrow', r'\leftarrow', r'\Rightarrow', r'\Leftarrow', r'\Leftrightarrow',
+    r'\le', r'\ge', r'\neq', r'\pm', r'\times', r'\div', r'^\circ', r'\sqrt{}',
+    r'\alpha', r'\beta', r'\gamma', r'\delta', r'\epsilon', r'\theta', r'\Theta', r'\lambda', r'\mu', r'\pi', r'\sigma', r'\tau', r'\phi', r'\omega',
+    r'\Delta', r'\Sigma', r'\Omega'
+}
+
 def clean_latex_text(text: str) -> str:
     if not text:
         return ""
-    if text.startswith("\\") or text.startswith("$"):
-        return text
-    text = re.sub(r'(?<!\\)&', r'\&', text)
-    text = re.sub(r'(?<!\\)%', r'\%', text)
-    text = re.sub(r'(?<!\\)_', r'\_', text)
-    text = re.sub(r'(?<!\\)#', r'\#', text)
+
+    if not text.startswith("\\"):
+        parts = text.split('$')
+        new_parts = []
+        for idx, part in enumerate(parts):
+            in_math = (idx % 2 == 1)
+            part_str = part
+            for char, repl in UNICODE_LATEX_MAP.items():
+                if char in part_str:
+                    if repl in MATH_CMDS:
+                        if in_math:
+                            part_str = part_str.replace(char, f" {repl} ")
+                        else:
+                            part_str = part_str.replace(char, f"${repl}$")
+                    else:
+                        part_str = part_str.replace(char, repl)
+            new_parts.append(part_str)
+        text = '$'.join(new_parts)
+
+    if not text.startswith("\\") and not text.startswith("$"):
+        text = re.sub(r'(?<!\\)&', r'\&', text)
+        text = re.sub(r'(?<!\\)%', r'\%', text)
+        text = re.sub(r'(?<!\\)_', r'\_', text)
+        text = re.sub(r'(?<!\\)#', r'\#', text)
+
     return text
 
 class BookMappingEngine:
@@ -51,8 +122,10 @@ class BookMappingEngine:
                 cmd = f"\\chapter{{{chap_title}}}"
             elif level == 2:
                 cmd = f"\\section{{{chap_title}}}"
-            else:
+            elif level == 3:
                 cmd = f"\\subsection{{{chap_title}}}"
+            else:
+                cmd = f"\\subsubsection{{{chap_title}}}"
 
             chap_blocks = [cmd]
 
