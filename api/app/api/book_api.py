@@ -360,8 +360,8 @@ async def convert_book(
             template_confidence=1.0,
             conformity_estimate=1.0,
             integrity=CountComparison(
-                paragraphs_source=sum(len(s.paragraphs) for s in udm.sections),
-                paragraphs_output=sum(len(s.paragraphs) for s in udm.sections),
+                paragraphs_source=sum(len(getattr(s, 'blocks', [])) for s in udm.sections),
+                paragraphs_output=sum(len(getattr(s, 'blocks', [])) for s in udm.sections),
                 references_source=len(udm.references),
                 references_output=len(udm.references)
             ),
