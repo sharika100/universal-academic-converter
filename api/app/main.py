@@ -113,6 +113,14 @@ async def normalize_vercel_path(request, call_next):
     for prefix in ["/backend/app/main.py", "/backend/app/main", "/api/index.py", "/api/index", "/index.py"]:
         if raw_path.startswith(prefix):
             clean_path = raw_path[len(prefix):]
+            if not clean_path:
+                hdr_path = (
+                    request.headers.get("x-matched-path") or
+                    request.headers.get("x-forwarded-uri") or
+                    request.headers.get("x-envoy-original-path")
+                )
+                if hdr_path and not (hdr_path.startswith("/api/index.py") or hdr_path.startswith("/api/index")):
+                    clean_path = hdr_path.split("?")[0]
             request.scope["path"] = clean_path if clean_path else "/"
             break
     return await call_next(request)
