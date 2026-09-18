@@ -159,8 +159,8 @@ async def normalize_vercel_path(request: Request, call_next):
                         clean_path = "/api/book/convert"
             elif body_bytes:
                 body_str = body_bytes.decode("utf-8", errors="ignore")
-                if "job_id=" in body_str:
-                    if "filename=" in body_str or 'name="file"' in body_str or "Content-Type: application/zip" in body_str or "Content-Type: application/vnd" in body_str:
+                if "job_id" in body_str:
+                    if 'name="file"' in body_str or 'filename=' in body_str or "Content-Type: application/zip" in body_str or "Content-Type: application/vnd" in body_str:
                         clean_path = "/api/book/analyze-template"
                     else:
                         clean_path = "/api/book/convert"
