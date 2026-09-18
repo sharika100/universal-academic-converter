@@ -192,14 +192,25 @@ async def analyze_book_source(
         else:
             raise HTTPException(status_code=400, detail="Unsupported manuscript format. Use .docx or .zip")
 
+        udm_json_str = udm.model_dump_json()
         udm_json_path = os.path.join(job_dir, "source_udm.json")
         with open(udm_json_path, "w", encoding="utf-8") as fh:
-            fh.write(udm.model_dump_json())
+            fh.write(udm_json_str)
+
+        udm_pathname = f"udm_state/{job_id}_source_udm.json"
+        udm_blob = put_blob_bytes(udm_pathname, udm_json_str.encode("utf-8"))
+        udm_blob_url = udm_blob.get("url") if udm_blob else None
+        udm_download_url = udm_blob.get("downloadUrl") if udm_blob else None
+        if udm_blob and udm_blob.get("pathname"):
+            udm_pathname = udm_blob.get("pathname")
 
         return JSONResponse({
             "job_id": job_id,
             "status": "SUCCESS",
             "udm": udm.model_dump(),
+            "udm_blob_url": udm_blob_url,
+            "udm_download_url": udm_download_url,
+            "udm_pathname": udm_pathname,
             "file_tree": file_tree
         })
     except Exception as e:
@@ -343,14 +354,25 @@ async def analyze_book_template(
         else:
             raise HTTPException(status_code=400, detail="Unsupported template format. Use .zip or .docx")
 
+        spec_json_str = spec.model_dump_json()
         spec_json_path = os.path.join(job_dir, "template_spec.json")
         with open(spec_json_path, "w", encoding="utf-8") as fh:
-            fh.write(spec.model_dump_json())
+            fh.write(spec_json_str)
+
+        spec_pathname = f"spec_state/{job_id}_template_spec.json"
+        spec_blob = put_blob_bytes(spec_pathname, spec_json_str.encode("utf-8"))
+        spec_blob_url = spec_blob.get("url") if spec_blob else None
+        spec_download_url = spec_blob.get("downloadUrl") if spec_blob else None
+        if spec_blob and spec_blob.get("pathname"):
+            spec_pathname = spec_blob.get("pathname")
 
         return JSONResponse({
             "job_id": job_id,
             "status": "SUCCESS",
             "spec": spec.model_dump(),
+            "spec_blob_url": spec_blob_url,
+            "spec_download_url": spec_download_url,
+            "spec_pathname": spec_pathname,
             "file_tree": file_tree
         })
     except Exception as e:
