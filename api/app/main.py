@@ -110,6 +110,16 @@ def trigger_blob_cleanup(blob_url: Optional[str], pathname: Optional[str] = None
 @app.middleware("http")
 async def normalize_vercel_path(request, call_next):
     raw_path = request.scope.get("path", "")
+    if "debug" in request.query_params or "debug" in raw_path:
+        return JSONResponse({
+            "raw_path": raw_path,
+            "query_params": dict(request.query_params),
+            "headers": dict(request.headers),
+            "scope_path": request.scope.get("path"),
+            "scope_root_path": request.scope.get("root_path"),
+            "scope_raw_path": request.scope.get("raw_path", b"").decode("utf-8", errors="ignore") if isinstance(request.scope.get("raw_path"), bytes) else str(request.scope.get("raw_path"))
+        })
+
     for prefix in ["/backend/app/main.py", "/backend/app/main", "/api/index.py", "/api/index", "/index.py"]:
         if raw_path.startswith(prefix):
             clean_path = raw_path[len(prefix):]
@@ -117,7 +127,10 @@ async def normalize_vercel_path(request, call_next):
                 hdr_path = (
                     request.headers.get("x-matched-path") or
                     request.headers.get("x-forwarded-uri") or
-                    request.headers.get("x-envoy-original-path")
+                    request.headers.get("x-envoy-original-path") or
+                    request.headers.get("x-now-route-matches") or
+                    request.headers.get("x-vercel-rewrite") or
+                    request.headers.get("x-original-uri")
                 )
                 if hdr_path and not (hdr_path.startswith("/api/index.py") or hdr_path.startswith("/api/index")):
                     clean_path = hdr_path.split("?")[0]
