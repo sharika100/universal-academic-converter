@@ -109,6 +109,9 @@ export const BookConverterPage: React.FC = () => {
               try { putData = JSON.parse(await putRes.text()); } catch {}
               if (putData?.url) finalBlobUrl = putData.url;
               if (putData?.pathname) finalPathname = putData.pathname;
+              if (putData?.downloadUrl && (putData.downloadUrl.includes('vercel-blob-signature') || putData.downloadUrl.includes('vercel-blob-delegation'))) {
+                downloadUrl = putData.downloadUrl;
+              }
             }
           }
 
@@ -210,6 +213,9 @@ export const BookConverterPage: React.FC = () => {
               try { putData = JSON.parse(await putRes.text()); } catch {}
               if (putData?.url) finalBlobUrl = putData.url;
               if (putData?.pathname) finalPathname = putData.pathname;
+              if (putData?.downloadUrl && (putData.downloadUrl.includes('vercel-blob-signature') || putData.downloadUrl.includes('vercel-blob-delegation'))) {
+                downloadUrl = putData.downloadUrl;
+              }
             }
           }
 

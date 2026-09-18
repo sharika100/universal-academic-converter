@@ -77,10 +77,9 @@ def fetch_blob_bytes(blob_url: str, download_url: Optional[str] = None, pathname
     
     headers = {}
     token = get_blob_read_write_token()
-    if token and not download_url:
-        headers["Authorization"] = f"Bearer {token}"
-    
     fetch_url = download_url if download_url else blob_url
+    if token and ("vercel-blob-signature" not in fetch_url and "vercel-blob-delegation" not in fetch_url):
+        headers["Authorization"] = f"Bearer {token}"
     try:
         resp = requests.get(fetch_url, headers=headers, timeout=60)
         if resp.status_code in (401, 403, 404):

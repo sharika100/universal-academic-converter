@@ -469,10 +469,9 @@ async def analyze_source_from_storage(req: StorageAnalysisRequest):
         else:
             headers = {}
             token = get_blob_read_write_token()
-            if token and not req.download_url:
-                headers["Authorization"] = f"Bearer {token}"
-            
             fetch_url = req.download_url if req.download_url else req.blob_url
+            if token and ("vercel-blob-signature" not in fetch_url and "vercel-blob-delegation" not in fetch_url):
+                headers["Authorization"] = f"Bearer {token}"
             logger.info(f"[{ref_id}] [BLOB_RETRIEVAL_ATTEMPTED] Fetching from storage (pathname: '{req.pathname or clean_filename}')")
             
             resp = requests.get(fetch_url, headers=headers, timeout=60)
