@@ -104,120 +104,120 @@ export const BookConverterPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div className="app-container">
       {/* Header */}
-      <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-600/20 text-indigo-400 rounded-lg border border-indigo-500/30">
-              <BookOpen className="w-6 h-6" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-                Book Converter
-                <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono">
-                  Isolated Beta
-                </span>
-              </h1>
-              <p className="text-xs text-slate-400">Universal Academic Format Converter Engine</p>
-            </div>
+      <header className="app-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', textAlign: 'left', marginBottom: '24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ padding: '8px', background: 'rgba(99, 102, 241, 0.15)', color: '#A5B4FC', borderRadius: '10px', border: '1px solid rgba(99, 102, 241, 0.3)' }}>
+            <BookOpen style={{ width: '24px', height: '24px' }} />
           </div>
-          <button
-            onClick={() => window.location.href = '/'}
-            className="text-xs text-slate-400 hover:text-white transition-colors"
-          >
-            ← Back to Main App
-          </button>
+          <div>
+            <h1 style={{ fontSize: '1.8rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+              Book Converter
+              <span className="panel-badge">
+                Isolated Beta
+              </span>
+            </h1>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>Universal Academic Format Converter Engine</p>
+          </div>
         </div>
+        <button
+          onClick={() => window.location.href = '/'}
+          className="btn-secondary"
+          style={{ fontSize: '0.85rem', padding: '8px 16px' }}
+        >
+          ← Back to Main App
+        </button>
       </header>
 
       {/* Main Container */}
-      <main className="flex-1 max-w-5xl mx-auto w-full px-6 py-10 space-y-8">
+      <main style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
         
         {/* Banner */}
-        <div className="p-6 rounded-2xl bg-gradient-to-r from-indigo-950/60 via-slate-900 to-slate-950 border border-indigo-500/20 space-y-2">
-          <h2 className="text-2xl font-bold text-white flex items-center gap-3">
+        <div className="panel" style={{ background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(17, 24, 39, 0.9) 100%)', borderColor: 'rgba(99, 102, 241, 0.3)' }}>
+          <h2 style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
             Convert Academic Manuscript to Book Format
           </h2>
-          <p className="text-sm text-slate-300 leading-relaxed max-w-3xl">
+          <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: '1.6', maxWidth: '800px' }}>
             Convert your academic manuscript into a book template while preserving your content and structure.
             Strictly enforces zero content rewriting, zero sample text leakage, and exact author metadata preservation.
           </p>
         </div>
 
         {/* Upload Panels */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="studio-grid">
           
           {/* 1. Source Panel */}
-          <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-semibold text-white flex items-center gap-2">
-                <FileText className="w-5 h-5 text-indigo-400" />
-                1. Source Manuscript
-              </h3>
-              <span className="text-xs text-slate-400 font-mono">DOCX / ZIP</span>
+          <div className="panel">
+            <div className="panel-header">
+              <div className="panel-title">
+                <FileText style={{ width: '20px', height: '20px', color: 'var(--accent-primary)' }} />
+                <span>1. Source Manuscript</span>
+              </div>
+              <span className="panel-badge">DOCX / ZIP</span>
             </div>
 
-            <label className="flex flex-col items-center justify-center p-8 rounded-xl border-2 border-dashed border-slate-700 hover:border-indigo-500/50 bg-slate-950/50 cursor-pointer transition-colors group">
-              <Upload className="w-8 h-8 text-slate-400 group-hover:text-indigo-400 transition-colors mb-2" />
-              <span className="text-sm font-medium text-slate-200">
+            <label className="dropzone" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+              <Upload className="dropzone-icon" />
+              <span className="dropzone-title">
                 {sourceFile ? sourceFile.name : "Select Manuscript File"}
               </span>
-              <span className="text-xs text-slate-500 mt-1">
+              <span className="dropzone-sub" style={{ marginTop: '4px' }}>
                 {sourceFile ? `${(sourceFile.size / 1024 / 1024).toFixed(2)} MB` : "Supports .docx manuscript"}
               </span>
-              <input type="file" accept=".docx,.zip" onChange={handleSourceUpload} className="hidden" />
+              <input type="file" accept=".docx,.zip" onChange={handleSourceUpload} style={{ display: 'none' }} />
             </label>
           </div>
 
           {/* 2. Destination Panel */}
-          <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-semibold text-white flex items-center gap-2">
-                <BookOpen className="w-5 h-5 text-indigo-400" />
-                2. Target Book Template
-              </h3>
-              <span className="text-xs text-slate-400 font-mono">LaTeX ZIP</span>
+          <div className="panel">
+            <div className="panel-header">
+              <div className="panel-title">
+                <BookOpen style={{ width: '20px', height: '20px', color: 'var(--accent-primary)' }} />
+                <span>2. Target Book Template</span>
+              </div>
+              <span className="panel-badge">LaTeX ZIP</span>
             </div>
 
-            <label className="flex flex-col items-center justify-center p-8 rounded-xl border-2 border-dashed border-slate-700 hover:border-indigo-500/50 bg-slate-950/50 cursor-pointer transition-colors group">
-              <Upload className="w-8 h-8 text-slate-400 group-hover:text-indigo-400 transition-colors mb-2" />
-              <span className="text-sm font-medium text-slate-200">
+            <label className="dropzone" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+              <Upload className="dropzone-icon" />
+              <span className="dropzone-title">
                 {destFile ? destFile.name : "Select Book Template ZIP"}
               </span>
-              <span className="text-xs text-slate-500 mt-1">
+              <span className="dropzone-sub" style={{ marginTop: '4px' }}>
                 {destFile ? `${(destFile.size / 1024 / 1024).toFixed(2)} MB` : "LaTeX Book Project (.zip)"}
               </span>
-              <input type="file" accept=".zip,.docx" onChange={handleDestUpload} className="hidden" />
+              <input type="file" accept=".zip,.docx" onChange={handleDestUpload} style={{ display: 'none' }} />
             </label>
           </div>
 
         </div>
 
         {/* Options & Action */}
-        <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <ShieldCheck className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+        <div className="panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <ShieldCheck style={{ width: '20px', height: '20px', color: 'var(--accent-success)', flexShrink: 0 }} />
             <div>
-              <p className="text-sm font-medium text-slate-200">Mode: FORMAT ONLY (Default)</p>
-              <p className="text-xs text-slate-400">Content is preserved without summarization or paraphrasing.</p>
+              <p style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-main)' }}>Mode: FORMAT ONLY (Default)</p>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Content is preserved without summarization or paraphrasing.</p>
             </div>
           </div>
 
           <button
             onClick={handleStartBookConversion}
             disabled={!sourceFile || !destFile || analyzing || converting}
-            className="w-full md:w-auto px-8 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 transition-all"
+            className="btn-primary"
+            style={{ padding: '12px 28px' }}
           >
             {analyzing || converting ? (
               <>
-                <RefreshCw className="w-5 h-5 animate-spin" />
+                <RefreshCw style={{ width: '20px', height: '20px', animation: 'spin 1s linear infinite' }} />
                 <span>{statusMessage || "Processing..."}</span>
               </>
             ) : (
               <>
                 <span>Convert Book</span>
-                <ArrowRight className="w-5 h-5" />
+                <ArrowRight style={{ width: '20px', height: '20px' }} />
               </>
             )}
           </button>
@@ -225,41 +225,42 @@ export const BookConverterPage: React.FC = () => {
 
         {/* Error Message */}
         {errorMessage && (
-          <div className="p-5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-rose-400 flex-shrink-0 mt-0.5" />
+          <div className="warning-box" style={{ background: 'rgba(239, 68, 68, 0.12)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#FCA5A5', display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+            <AlertCircle style={{ width: '20px', height: '20px', color: '#EF4444', flexShrink: 0, marginTop: '2px' }} />
             <div>
-              <p className="text-sm font-semibold">Book Conversion Warning</p>
-              <p className="text-xs mt-1 leading-relaxed text-rose-200">{errorMessage}</p>
+              <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>Book Conversion Warning</p>
+              <p style={{ fontSize: '0.825rem', marginTop: '4px', lineHeight: '1.5' }}>{errorMessage}</p>
             </div>
           </div>
         )}
 
         {/* Output & Download Card */}
         {report && (
-          <div className="p-8 rounded-2xl bg-slate-900 border border-emerald-500/30 space-y-6">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-              <div className="flex items-center gap-3">
-                <CheckCircle2 className="w-7 h-7 text-emerald-400" />
+          <div className="report-section">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #1E293B', paddingBottom: '16px', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <CheckCircle2 style={{ width: '28px', height: '28px', color: 'var(--accent-success)' }} />
                 <div>
-                  <h3 className="text-lg font-bold text-white">Book Conversion Complete</h3>
-                  <p className="text-xs text-slate-400">Generated target LaTeX book project ZIP</p>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-main)' }}>Book Conversion Complete</h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Generated target LaTeX book project ZIP</p>
                 </div>
               </div>
               <button
                 onClick={handleDownloadZip}
-                className="px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all"
+                className="btn-primary"
+                style={{ background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)', padding: '10px 24px' }}
               >
-                <Download className="w-5 h-5" />
+                <Download style={{ width: '18px', height: '18px' }} />
                 Download Book ZIP
               </button>
             </div>
 
             {/* Validation Checklist */}
-            <div className="space-y-2">
-              <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Integrity Checks</h4>
-              <ul className="space-y-1 text-xs font-mono">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <h4 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Integrity Checks</h4>
+              <ul style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', listStyle: 'none' }}>
                 {report.validation_checks?.checks?.map((chk: string, idx: number) => (
-                  <li key={idx} className={chk.startsWith('[FAIL]') ? 'text-rose-400' : 'text-emerald-400'}>
+                  <li key={idx} style={{ color: chk.startsWith('[FAIL]') ? '#EF4444' : '#10B981' }}>
                     {chk}
                   </li>
                 ))}
