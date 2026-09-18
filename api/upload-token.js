@@ -1,4 +1,3 @@
-import { handleUpload } from '@vercel/blob/client';
 import { issueSignedToken, presignUrl, parseStoreIdFromDelegationToken } from '@vercel/blob';
 
 // Auto-alias store-prefixed Vercel Blob environment variables if standard names are missing
@@ -30,7 +29,7 @@ export default async function handler(request, response) {
 
   const envKeys = Object.keys(process.env).filter(k => k.includes('BLOB') || k.includes('OIDC') || k.includes('VERCEL'));
   console.log('[UPLOAD_AUTH_ENDPOINT_CALLED] Route: /api/upload-token');
-  console.log(`[BLOB_DIAGNOSTICS] SDK_VERSION: 2.8.0, Available Blob/Vercel Env Keys: [${envKeys.join(', ')}]`);
+  console.log(`[BLOB_DIAGNOSTICS] Available Blob/Vercel Env Keys: [${envKeys.join(', ')}]`);
 
   try {
     let body;
@@ -44,41 +43,11 @@ export default async function handler(request, response) {
       body = request.body || {};
     }
 
-    // 1. Standard @vercel/blob/client handleUpload protocol
-    if (body && (body.type === 'blob.generate-client-token' || body.type === 'blob.upload-completed')) {
-      const jsonResponse = await handleUpload({
-        body,
-        request,
-        token: process.env.BLOB_READ_WRITE_TOKEN,
-        onBeforeGenerateToken: async (pathname) => {
-          return {
-            allowedContentTypes: [
-              'application/zip',
-              'application/x-zip-compressed',
-              'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-              'application/x-tex',
-              'text/plain',
-              'application/pdf',
-              'application/octet-stream'
-            ],
-            maximumSizeInBytes: 100 * 1024 * 1024,
-            tokenPayload: JSON.stringify({ pathname })
-          };
-        },
-        onUploadCompleted: async ({ blob }) => {
-          console.log('[BLOB_CLIENT_UPLOAD_COMPLETED]', blob.pathname);
-        }
-      });
-      return response.status(200).json(jsonResponse);
-    }
-
-    // 2. Custom presigned URL generation protocol
-    const filename = body.filename || `manuscript_${Date.now()}.zip`;
-    const size = body.size || 0;
-    const cleanFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const rawFilename = body.payload?.pathname || body.filename || `manuscript_${Date.now()}.zip`;
+    const cleanFilename = String(rawFilename).split(/[\/\\]/).pop().replace(/[^a-zA-Z0-9._-]/g, '_');
     const pathname = `uploads/${Date.now()}_${cleanFilename}`;
 
-    console.log(`[UPLOAD_REQUESTED] filename: ${cleanFilename}, size: ${size}`);
+    console.log(`[UPLOAD_REQUESTED] filename: ${cleanFilename}, pathname: ${pathname}`);
 
     const commandOptions = {};
     if (process.env.BLOB_READ_WRITE_TOKEN) {
@@ -101,13 +70,17 @@ export default async function handler(request, response) {
       ...commandOptions,
     });
 
+    const clientToken = (signedToken && typeof signedToken === 'object' && signedToken.delegationToken)
+      ? signedToken.delegationToken
+      : (typeof signedToken === 'string' ? signedToken : '');
+
     let storeId = 'store';
     try {
-      if (signedToken && signedToken.delegationToken) {
-        storeId = parseStoreIdFromDelegationToken(signedToken.delegationToken) || 'store';
+      if (clientToken) {
+        storeId = parseStoreIdFromDelegationToken(clientToken) || 'store';
       }
     } catch (e) {
-      console.warn('Could not parse storeId from delegation token:', e.message);
+      console.warn('Could not parse storeId:', e.message);
     }
 
     const { presignedUrl: uploadUrl } = await presignUrl(signedToken, {
@@ -127,15 +100,25 @@ export default async function handler(request, response) {
 
     const canonicalBlobUrl = `https://${storeId}.private.blob.vercel-storage.com/${pathname}`;
 
-    console.log(`[BLOB_AUTH_SUCCESS] Presigned PUT URL generated for pathname: ${pathname}`);
+    console.log(`[BLOB_AUTH_SUCCESS] Generated token & URLs for pathname: ${pathname}`);
 
-    return response.status(200).json({
+    const responsePayload = {
       uploadUrl,
       downloadUrl,
-      presignedUrl: uploadUrl, // compatibility
+      presignedUrl: uploadUrl,
       pathname,
       blobUrl: canonicalBlobUrl
-    });
+    };
+
+    if (clientToken) {
+      responsePayload.clientToken = clientToken;
+    }
+
+    if (body && (body.type === 'blob.generate-client-token' || body.type === 'blob.upload-completed')) {
+      responsePayload.type = body.type;
+    }
+
+    return response.status(200).json(responsePayload);
 
   } catch (error) {
     console.error('[BLOB_AUTH_ERROR] Client upload authorization failed:', error.name, error.message);
