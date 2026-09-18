@@ -32,11 +32,5 @@
       "source": "/(.*)",
       "destination": "/index.html"
     }
-  ],
-  "crons": [
-    {
-      "path": "/api/blob-delete?clean_abandoned=true",
-      "schedule": "0 * * * *"
-    }
   ]
 }
