@@ -282,8 +282,19 @@ export const BookConverterPage: React.FC = () => {
       convData.append('job_id', currentJobId);
       if (sourceFile.size <= LARGE_FILE_THRESHOLD) {
         convData.append('udm_json_str', JSON.stringify(srcJson.udm));
-        if (tmplJson.spec) convData.append('spec_json_str', JSON.stringify(tmplJson.spec));
       }
+      if (destFile.size <= LARGE_FILE_THRESHOLD && tmplJson.spec) {
+        convData.append('spec_json_str', JSON.stringify(tmplJson.spec));
+      }
+
+      if (srcJson.udm_blob_url) convData.append('udm_blob_url', srcJson.udm_blob_url);
+      if (srcJson.udm_download_url) convData.append('udm_download_url', srcJson.udm_download_url);
+      if (srcJson.udm_pathname) convData.append('udm_pathname', srcJson.udm_pathname);
+
+      if (tmplJson.spec_blob_url) convData.append('spec_blob_url', tmplJson.spec_blob_url);
+      if (tmplJson.spec_download_url) convData.append('spec_download_url', tmplJson.spec_download_url);
+      if (tmplJson.spec_pathname) convData.append('spec_pathname', tmplJson.spec_pathname);
+
 
       const convRes = await fetch('/api/book/convert', { method: 'POST', body: convData });
 

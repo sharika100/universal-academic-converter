@@ -99,6 +99,51 @@ def fetch_blob_bytes(blob_url: str, download_url: Optional[str] = None, pathname
         logger.error(f"Blob retrieval error: {e}")
     return None
 
+def put_blob_bytes(pathname: str, content: bytes, content_type: str = "application/json") -> Optional[Dict[str, Any]]:
+    token = get_blob_read_write_token()
+    if not token:
+        logger.warning("[BLOB_PUT_WARNING] No token available for put_blob_bytes")
+        return None
+    try:
+        host_url = os.environ.get("VERCEL_PROJECT_PRODUCTION_URL") or os.environ.get("VERCEL_URL")
+        if host_url:
+            if not host_url.startswith("http"):
+                host_url = f"https://{host_url}"
+            token_endpoint = f"{host_url}/api/upload-token"
+        else:
+            token_endpoint = "http://127.0.0.1:3000/api/upload-token"
+
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        
+        resp_token = requests.post(
+            token_endpoint,
+            json={"pathname": pathname, "contentType": content_type},
+            headers=headers,
+            timeout=15
+        )
+        if resp_token.status_code == 200:
+            tdata = resp_token.json()
+            upload_url = tdata.get("uploadUrl")
+            if upload_url:
+                put_res = requests.put(
+                    upload_url,
+                    data=content,
+                    headers={"x-api-version": "7", "content-type": content_type},
+                    timeout=60
+                )
+                if put_res.status_code == 200:
+                    put_data = put_res.json()
+                    return {
+                        "url": put_data.get("url") or tdata.get("blobUrl"),
+                        "downloadUrl": tdata.get("downloadUrl") or put_data.get("downloadUrl"),
+                        "pathname": put_data.get("pathname") or tdata.get("pathname") or pathname
+                    }
+    except Exception as e:
+        logger.warning(f"[BLOB_PUT_WARNING] Server-side Blob PUT failed for pathname '{pathname}': {e}")
+    return None
+
 class BookConvertRequest(BaseModel):
     job_id: str
     udm: Optional[Dict[str, Any]] = None
@@ -192,14 +237,25 @@ async def analyze_book_source_from_storage(req: BookStorageAnalysisRequest):
         else:
             raise HTTPException(status_code=400, detail="Unsupported manuscript format. Use .docx or .zip")
 
+        udm_json_str = udm.model_dump_json()
         udm_json_path = os.path.join(job_dir, "source_udm.json")
         with open(udm_json_path, "w", encoding="utf-8") as fh:
-            fh.write(udm.model_dump_json())
+            fh.write(udm_json_str)
+
+        udm_pathname = f"udm_state/{job_id}_source_udm.json"
+        udm_blob = put_blob_bytes(udm_pathname, udm_json_str.encode("utf-8"))
+        udm_blob_url = udm_blob.get("url") if udm_blob else None
+        udm_download_url = udm_blob.get("downloadUrl") if udm_blob else None
+        if udm_blob and udm_blob.get("pathname"):
+            udm_pathname = udm_blob.get("pathname")
 
         return JSONResponse({
             "job_id": job_id,
             "status": "SUCCESS",
             "udm": udm.model_dump(),
+            "udm_blob_url": udm_blob_url,
+            "udm_download_url": udm_download_url,
+            "udm_pathname": udm_pathname,
             "file_tree": file_tree
         })
     except Exception as e:
@@ -236,14 +292,25 @@ async def analyze_book_template_from_storage(req: BookTemplateStorageAnalysisReq
         else:
             raise HTTPException(status_code=400, detail="Unsupported template format. Use .zip or .docx")
 
+        spec_json_str = spec.model_dump_json()
         spec_json_path = os.path.join(job_dir, "template_spec.json")
         with open(spec_json_path, "w", encoding="utf-8") as fh:
-            fh.write(spec.model_dump_json())
+            fh.write(spec_json_str)
+
+        spec_pathname = f"spec_state/{req.job_id}_template_spec.json"
+        spec_blob = put_blob_bytes(spec_pathname, spec_json_str.encode("utf-8"))
+        spec_blob_url = spec_blob.get("url") if spec_blob else None
+        spec_download_url = spec_blob.get("downloadUrl") if spec_blob else None
+        if spec_blob and spec_blob.get("pathname"):
+            spec_pathname = spec_blob.get("pathname")
 
         return JSONResponse({
             "job_id": req.job_id,
             "status": "SUCCESS",
             "spec": spec.model_dump(),
+            "spec_blob_url": spec_blob_url,
+            "spec_download_url": spec_download_url,
+            "spec_pathname": spec_pathname,
             "file_tree": file_tree
         })
     except Exception as e:
@@ -294,7 +361,13 @@ async def analyze_book_template(
 async def convert_book(
     job_id: str = Form(...),
     udm_json_str: Optional[str] = Form(None),
-    spec_json_str: Optional[str] = Form(None)
+    spec_json_str: Optional[str] = Form(None),
+    udm_blob_url: Optional[str] = Form(None),
+    udm_download_url: Optional[str] = Form(None),
+    udm_pathname: Optional[str] = Form(None),
+    spec_blob_url: Optional[str] = Form(None),
+    spec_download_url: Optional[str] = Form(None),
+    spec_pathname: Optional[str] = Form(None)
 ):
     job_dir = os.path.join(TEMP_STORAGE, job_id)
     if not os.path.exists(job_dir):
@@ -304,20 +377,36 @@ async def convert_book(
         if udm_json_str:
             udm = UniversalDocumentModel.model_validate_json(udm_json_str)
         else:
+            udm_bytes = None
             udm_path = os.path.join(job_dir, "source_udm.json")
-            if not os.path.exists(udm_path):
+            if os.path.exists(udm_path):
+                with open(udm_path, "rb") as fh:
+                    udm_bytes = fh.read()
+            else:
+                target_url = udm_download_url or udm_blob_url
+                target_pathname = udm_pathname or f"udm_state/{job_id}_source_udm.json"
+                udm_bytes = fetch_blob_bytes(target_url or target_pathname, udm_download_url, target_pathname)
+
+            if not udm_bytes:
                 raise HTTPException(status_code=400, detail="Missing source UDM state.")
-            with open(udm_path, "r", encoding="utf-8") as fh:
-                udm = UniversalDocumentModel.model_validate_json(fh.read())
+            udm = UniversalDocumentModel.model_validate_json(udm_bytes.decode("utf-8"))
 
         if spec_json_str:
             spec = BookTemplateSpecification.model_validate_json(spec_json_str)
         else:
+            spec_bytes = None
             spec_path = os.path.join(job_dir, "template_spec.json")
-            if not os.path.exists(spec_path):
+            if os.path.exists(spec_path):
+                with open(spec_path, "rb") as fh:
+                    spec_bytes = fh.read()
+            else:
+                target_url = spec_download_url or spec_blob_url
+                target_pathname = spec_pathname or f"spec_state/{job_id}_template_spec.json"
+                spec_bytes = fetch_blob_bytes(target_url or target_pathname, spec_download_url, target_pathname)
+
+            if not spec_bytes:
                 raise HTTPException(status_code=400, detail="Missing template specification state.")
-            with open(spec_path, "r", encoding="utf-8") as fh:
-                spec = BookTemplateSpecification.model_validate_json(fh.read())
+            spec = BookTemplateSpecification.model_validate_json(spec_bytes.decode("utf-8"))
 
         tmpl_extracted_dir = os.path.join(job_dir, "extracted_tmpl")
         out_project_dir = os.path.join(job_dir, "output_project")
@@ -383,9 +472,17 @@ async def convert_book(
                 "warnings": val_res["warnings"]
             }
         })
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Book conversion failed: {e}")
         raise HTTPException(status_code=500, detail=f"Book conversion failed: {str(e)}")
+    finally:
+        if udm_blob_url or udm_pathname:
+            trigger_blob_cleanup(udm_blob_url, udm_pathname)
+        if spec_blob_url or spec_pathname:
+            trigger_blob_cleanup(spec_blob_url, spec_pathname)
+
 
 @router.get("/download/{job_id}/zip")
 async def download_book_zip(job_id: str):
