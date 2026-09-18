@@ -167,7 +167,9 @@ async def normalize_vercel_path(request: Request, call_next):
     if not clean_path and request.method == "GET":
         clean_path = "/api/health"
 
-    request.scope["path"] = clean_path if clean_path else "/"
+    final_path = clean_path if clean_path else "/"
+    request.scope["path"] = final_path
+    request.scope["raw_path"] = final_path.encode("utf-8")
     return await call_next(request)
 
 @app.exception_handler(404)
