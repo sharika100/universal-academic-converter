@@ -9,6 +9,23 @@ async function calculateSHA256(file: File): Promise<string> {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+function formatErrorDetail(detail: any, defaultMsg: string): string {
+  if (!detail) return defaultMsg;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map(item => {
+      if (typeof item === 'object' && item !== null) {
+        return item.msg || item.message || JSON.stringify(item);
+      }
+      return String(item);
+    }).join('; ');
+  }
+  if (typeof detail === 'object') {
+    return detail.message || detail.detail || JSON.stringify(detail);
+  }
+  return String(detail);
+}
+
 export const BookConverterPage: React.FC = () => {
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [destFile, setDestFile] = useState<File | null>(null);
@@ -145,7 +162,7 @@ export const BookConverterPage: React.FC = () => {
         } else {
           try {
             const errJson = await srcRes.json();
-            errDetail = errJson.detail || errJson.message || errDetail;
+            errDetail = formatErrorDetail(errJson.detail || errJson.message, errDetail);
           } catch {
             const text = await srcRes.text().catch(() => '');
             if (text) errDetail = text.slice(0, 200);
@@ -246,7 +263,7 @@ export const BookConverterPage: React.FC = () => {
         let errDetail = `Server returned HTTP ${tmplRes.status} error during template analysis.`;
         try {
           const errJson = await tmplRes.json();
-          errDetail = errJson.detail || errJson.message || errDetail;
+          errDetail = formatErrorDetail(errJson.detail || errJson.message, errDetail);
         } catch {
           const text = await tmplRes.text().catch(() => '');
           if (text) errDetail = text.slice(0, 200);
@@ -274,7 +291,7 @@ export const BookConverterPage: React.FC = () => {
         let errDetail = `Book conversion failed (HTTP ${convRes.status})`;
         try {
           const errJson = await convRes.json();
-          errDetail = errJson.detail || errJson.message || errDetail;
+          errDetail = formatErrorDetail(errJson.detail || errJson.message, errDetail);
         } catch {
           const text = await convRes.text().catch(() => '');
           if (text) errDetail = text.slice(0, 200);

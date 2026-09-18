@@ -152,16 +152,18 @@ async def normalize_vercel_path(request: Request, call_next):
                         clean_path = "/api/analyze-source-from-storage"
                     else:
                         clean_path = "/api/book/analyze-source-from-storage"
-                elif "job_id" in data and ("udm" in data or "spec" in data or "udm_json_str" in data or "spec_json_str" in data):
-                    clean_path = "/api/book/convert"
                 elif "job_id" in data:
-                    clean_path = "/api/book/analyze-template"
+                    if "filename" in data or "file" in data:
+                        clean_path = "/api/book/analyze-template"
+                    else:
+                        clean_path = "/api/book/convert"
             elif body_bytes:
                 body_str = body_bytes.decode("utf-8", errors="ignore")
-                if "job_id=" in body_str and ("udm_json_str=" in body_str or "spec_json_str=" in body_str):
-                    clean_path = "/api/book/convert"
-                elif "job_id=" in body_str:
-                    clean_path = "/api/book/analyze-template"
+                if "job_id=" in body_str:
+                    if "filename=" in body_str or 'name="file"' in body_str or "Content-Type: application/zip" in body_str or "Content-Type: application/vnd" in body_str:
+                        clean_path = "/api/book/analyze-template"
+                    else:
+                        clean_path = "/api/book/convert"
                 else:
                     clean_path = "/api/book/analyze-source"
         except Exception as payload_err:
@@ -215,7 +217,7 @@ INLINE_INDEX_HTML = """<!doctype html>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <script type="module" crossorigin src="/assets/index-BZ7fPj9U.js"></script>
+    <script type="module" crossorigin src="/assets/index-C4r3NVNi.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-CuU9JyVg.css">
   </head>
   <body>
