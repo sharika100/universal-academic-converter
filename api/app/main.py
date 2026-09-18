@@ -108,30 +108,66 @@ def trigger_blob_cleanup(blob_url: Optional[str], pathname: Optional[str] = None
         logger.warning(f"[TEMPORARY_BLOB_CLEANUP_WARNING] Failed to trigger Blob deletion: {del_err}")
 
 @app.middleware("http")
-async def normalize_vercel_path(request, call_next):
+async def normalize_vercel_path(request: Request, call_next):
     raw_path = request.scope.get("path", "")
-    if "debug" in request.query_params or "debug" in raw_path:
-        return JSONResponse({
-            "scope_all": {k: str(v) for k, v in request.scope.items() if k != "app"},
-            "headers_all": dict(request.headers)
-        })
+    clean_path = raw_path
 
     for prefix in ["/backend/app/main.py", "/backend/app/main", "/api/index.py", "/api/index", "/index.py"]:
-        if raw_path.startswith(prefix):
-            clean_path = raw_path[len(prefix):]
-            if not clean_path:
-                hdr_path = (
-                    request.headers.get("x-matched-path") or
-                    request.headers.get("x-forwarded-uri") or
-                    request.headers.get("x-envoy-original-path") or
-                    request.headers.get("x-now-route-matches") or
-                    request.headers.get("x-vercel-rewrite") or
-                    request.headers.get("x-original-uri")
-                )
-                if hdr_path and not (hdr_path.startswith("/api/index.py") or hdr_path.startswith("/api/index")):
-                    clean_path = hdr_path.split("?")[0]
-            request.scope["path"] = clean_path if clean_path else "/"
+        if clean_path.startswith(prefix):
+            clean_path = clean_path[len(prefix):]
             break
+
+    if not clean_path:
+        hdr_path = (
+            request.headers.get("x-matched-path") or
+            request.headers.get("x-forwarded-uri") or
+            request.headers.get("x-envoy-original-path") or
+            request.headers.get("x-now-route-matches") or
+            request.headers.get("x-vercel-rewrite") or
+            request.headers.get("x-original-uri")
+        )
+        if hdr_path and not (hdr_path.startswith("/api/index.py") or hdr_path.startswith("/api/index")):
+            clean_path = hdr_path.split("?")[0]
+
+    if not clean_path and request.method == "POST":
+        try:
+            body_bytes = await request.body()
+            async def receive():
+                return {"type": "http.request", "body": body_bytes}
+            request._receive = receive
+
+            data = {}
+            if body_bytes:
+                try:
+                    data = json.loads(body_bytes.decode("utf-8"))
+                except Exception:
+                    body_str = body_bytes.decode("utf-8", errors="ignore")
+                    if "job_id=" in body_str and ("udm_json_str=" in body_str or "spec_json_str=" in body_str):
+                        clean_path = "/api/book/convert"
+                    elif "job_id=" in body_str:
+                        clean_path = "/api/book/analyze-template"
+                    else:
+                        clean_path = "/api/book/analyze-source"
+
+            if isinstance(data, dict):
+                if "blob_url" in data:
+                    if "job_id" in data:
+                        clean_path = "/api/book/analyze-template-from-storage"
+                    elif "source_type" in data or "selected_entrypoint" in data:
+                        clean_path = "/api/analyze-source-from-storage"
+                    else:
+                        clean_path = "/api/book/analyze-source-from-storage"
+                elif "job_id" in data and ("udm" in data or "spec" in data or "udm_json_str" in data or "spec_json_str" in data):
+                    clean_path = "/api/book/convert"
+                elif "job_id" in data:
+                    clean_path = "/api/book/analyze-template"
+        except Exception as payload_err:
+            logger.warning(f"Path recovery payload inspection warning: {payload_err}")
+
+    if not clean_path and request.method == "GET":
+        clean_path = "/api/health"
+
+    request.scope["path"] = clean_path if clean_path else "/"
     return await call_next(request)
 
 @app.exception_handler(404)
