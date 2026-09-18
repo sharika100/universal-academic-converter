@@ -112,12 +112,8 @@ async def normalize_vercel_path(request, call_next):
     raw_path = request.scope.get("path", "")
     if "debug" in request.query_params or "debug" in raw_path:
         return JSONResponse({
-            "raw_path": raw_path,
-            "query_params": dict(request.query_params),
-            "headers": dict(request.headers),
-            "scope_path": request.scope.get("path"),
-            "scope_root_path": request.scope.get("root_path"),
-            "scope_raw_path": request.scope.get("raw_path", b"").decode("utf-8", errors="ignore") if isinstance(request.scope.get("raw_path"), bytes) else str(request.scope.get("raw_path"))
+            "scope_all": {k: str(v) for k, v in request.scope.items() if k != "app"},
+            "headers_all": dict(request.headers)
         })
 
     for prefix in ["/backend/app/main.py", "/backend/app/main", "/api/index.py", "/api/index", "/index.py"]:
