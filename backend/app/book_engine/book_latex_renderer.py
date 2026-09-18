@@ -3,10 +3,14 @@ import re
 import shutil
 import base64
 import zipfile
+import logging
 from typing import List, Dict, Any
 from app.models.udm import UniversalDocumentModel
 from app.book_engine.book_template_analyzer import BookTemplateSpecification
 from app.book_engine.book_mapping_engine import BookMappingEngine
+from app.book_engine.image_converter import is_unsupported_latex_image, convert_image_to_latex_compatible, get_latex_compatible_filename
+
+logger = logging.getLogger("BookLatexRenderer")
 
 class BookLatexRenderer:
     @staticmethod
@@ -35,21 +39,28 @@ class BookLatexRenderer:
         fig_idx = 1
         for sec in udm.sections:
             for blk in sec.blocks:
-                btype = blk.get("type") if isinstance(blk, dict) else getattr(blk, "type", "")
-                if btype == "figure":
-                    b64_data = blk.get("image_data_b64") if isinstance(blk, dict) else getattr(blk, "image_data_b64", None)
-                    raw_fname = blk.get("image_filename") if isinstance(blk, dict) else getattr(blk, "image_filename", "")
-                    if b64_data:
-                        if not raw_fname:
-                            raw_fname = f"figure_{fig_idx}.png"
-                            fig_idx += 1
-                        try:
-                            img_path = os.path.join(fig_dir, raw_fname)
-                            with open(img_path, "wb") as fh:
-                                fh.write(base64.b64decode(b64_data))
-                            created_files.append(f"figures/{raw_fname}")
-                        except Exception:
-                            pass
+                b64_data = blk.get("image_data_b64") if isinstance(blk, dict) else getattr(blk, "image_data_b64", None)
+                raw_fname = blk.get("image_filename") if isinstance(blk, dict) else getattr(blk, "image_filename", "")
+                if b64_data:
+                    if not raw_fname:
+                        raw_fname = f"figure_{fig_idx}.png"
+                        fig_idx += 1
+                    try:
+                        img_bytes = base64.b64decode(b64_data)
+                        orig_ext = os.path.splitext(raw_fname)[1].lower()
+                        if is_unsupported_latex_image(orig_ext):
+                            img_bytes, _ = convert_image_to_latex_compatible(img_bytes, orig_ext)
+                            target_fname = get_latex_compatible_filename(raw_fname)
+                        else:
+                            target_fname = raw_fname
+
+                        img_path = os.path.join(fig_dir, target_fname)
+                        with open(img_path, "wb") as fh:
+                            fh.write(img_bytes)
+                        if f"figures/{target_fname}" not in created_files:
+                            created_files.append(f"figures/{target_fname}")
+                    except Exception as img_err:
+                        logger.warning(f"Failed to process figure {raw_fname}: {img_err}")
 
         bib_path = os.path.join(output_dir, "references.bib")
         with open(bib_path, "w", encoding="utf-8") as fh:
@@ -81,6 +92,9 @@ class BookLatexRenderer:
         mapped = BookMappingEngine.map_book_structure(udm, spec)
         main_tex_content = BookLatexRenderer._assemble_main_tex(mapped, spec)
         
+        # Enforce LaTeX-compatible image file extensions in main.tex
+        main_tex_content = re.sub(r'figures/([^}\s]*?)\.(emf|wmf|tif|tiff|bmp)', r'figures/\1.png', main_tex_content, flags=re.I)
+
         main_tex_path = os.path.join(output_dir, "main.tex")
         with open(main_tex_path, "w", encoding="utf-8") as fh:
             fh.write(main_tex_content)

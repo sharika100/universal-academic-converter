@@ -2,6 +2,7 @@ import re
 from typing import List, Dict, Any, Tuple
 from app.models.udm import UniversalDocumentModel, Section, Paragraph, Figure, Table, Equation, Author, Affiliation
 from app.book_engine.book_template_analyzer import BookTemplateSpecification
+from app.book_engine.image_converter import get_latex_compatible_filename
 
 def clean_latex_text(text: str) -> str:
     if not text:
@@ -74,6 +75,8 @@ class BookMappingEngine:
                 elif btype == "figure":
                     fname = blk.get("image_filename") if isinstance(blk, dict) else getattr(blk, "image_filename", "")
                     caption = blk.get("caption") if isinstance(blk, dict) else getattr(blk, "caption", "")
+                    if fname:
+                        fname = get_latex_compatible_filename(fname)
                     fig_str = "\\begin{figure}[htbp]\n\\centering\n"
                     if fname:
                         fig_str += f"\\includegraphics[width=0.8\\linewidth]{{figures/{fname}}}\n"
