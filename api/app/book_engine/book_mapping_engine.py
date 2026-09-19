@@ -172,11 +172,18 @@ def clean_latex_text(text: str) -> str:
         part_str = part
         for char, repl in UNICODE_LATEX_MAP.items():
             if char in part_str:
-                if repl in MATH_CMDS:
+                clean_repl = repl.strip()
+                is_math_cmd = (
+                    clean_repl in MATH_CMDS
+                    or (clean_repl.startswith('\\') and not clean_repl.startswith('\\text') and not clean_repl.startswith('`') and not clean_repl.startswith("'") and clean_repl not in ['~', '---', '--', '``', "''", '`', "'"])
+                    or clean_repl.startswith('_')
+                    or clean_repl.startswith('^')
+                )
+                if is_math_cmd:
                     if in_math:
-                        part_str = part_str.replace(char, f" {repl} ")
+                        part_str = part_str.replace(char, f" {clean_repl} ")
                     else:
-                        part_str = part_str.replace(char, f"${repl}$")
+                        part_str = part_str.replace(char, f"${clean_repl}$")
                 else:
                     part_str = part_str.replace(char, repl)
         new_parts.append(part_str)
