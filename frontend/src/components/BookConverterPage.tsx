@@ -96,12 +96,11 @@ export const BookConverterPage: React.FC = () => {
               handleUploadUrl: '/api/upload-token',
               clientPayload: JSON.stringify({ addRandomSuffix: true }),
               multipart: true,
-              addRandomSuffix: true,
               contentType: sourceFile.type || 'application/octet-stream',
               onUploadProgress: (progress: any) => {
                 setStatusMessage(`1/3 Uploading manuscript to secure storage (${progress.percentage.toFixed(0)}%)...`);
               }
-            } as any);
+            });
             finalBlobUrl = blob.url;
             finalPathname = blob.pathname;
             downloadUrl = (blob as any).downloadUrl || blob.url;
@@ -213,12 +212,11 @@ export const BookConverterPage: React.FC = () => {
               handleUploadUrl: '/api/upload-token',
               clientPayload: JSON.stringify({ addRandomSuffix: true }),
               multipart: true,
-              addRandomSuffix: true,
               contentType: destFile.type || 'application/octet-stream',
               onUploadProgress: (progress: any) => {
                 setStatusMessage(`2/3 Uploading target template to secure storage (${progress.percentage.toFixed(0)}%)...`);
               }
-            } as any);
+            });
             finalBlobUrl = blob.url;
             finalPathname = blob.pathname;
             downloadUrl = (blob as any).downloadUrl || blob.url;
