@@ -50,7 +50,7 @@ module.exports = async function handler(request, response) {
       ],
       maximumSizeInBytes: 500 * 1024 * 1024, // 500 MB (up to 5 TB with multipart)
       addRandomSuffix: false,
-      validUntil: Date.now() + 24 * 60 * 60 * 1000, // 24 hours expiration window for multi-part uploads
+      validUntil: Date.now() + 30 * 60 * 1000, // 30 minutes validity window for multi-part uploads
       token: rwToken
     });
 
