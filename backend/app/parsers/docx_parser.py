@@ -214,7 +214,7 @@ class DocxParser:
                     
                     if is_equation_image:
                         current_section.blocks.append(Equation(
-                            math_latex=f"\\includegraphics[max width=0.8\\linewidth]{{figures/{fname}}}",
+                            math_latex=f"\\includegraphics[width=0.8\\linewidth]{{figures/{fname}}}",
                             label=f"eq_{occurrence_counter}",
                             image_filename=fname,
                             image_data_b64=img_info["b64"],

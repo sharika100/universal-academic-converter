@@ -114,6 +114,7 @@ class BookLatexRenderer:
         
         # Enforce LaTeX-compatible image file extensions in main.tex
         main_tex_content = re.sub(r'figures/([^}\s]*?)\.(emf|wmf|tif|tiff|bmp|gif|webp|svg|ico)', r'figures/\1.png', main_tex_content, flags=re.I)
+        main_tex_content = re.sub(r'max width=', r'width=', main_tex_content)
 
         # Automated Package Integrity Check: referenced image -> file exists -> valid image -> usable by LaTeX
         inc_refs = re.findall(r'\\includegraphics(?:\[.*?\])?\{([^}]*)\}', main_tex_content)
