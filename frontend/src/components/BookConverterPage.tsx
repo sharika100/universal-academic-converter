@@ -85,7 +85,11 @@ export const BookConverterPage: React.FC = () => {
             const blob = await upload(sourceFile.name, sourceFile, {
               access: 'private',
               handleUploadUrl: '/api/upload-token',
-              contentType: sourceFile.type || 'application/octet-stream'
+              multipart: true,
+              contentType: sourceFile.type || 'application/octet-stream',
+              onUploadProgress: (progress) => {
+                setStatusMessage(`1/3 Uploading manuscript to secure storage (${progress.percentage.toFixed(0)}%)...`);
+              }
             });
             finalBlobUrl = blob.url;
             finalPathname = blob.pathname;
@@ -190,7 +194,11 @@ export const BookConverterPage: React.FC = () => {
             const blob = await upload(destFile.name, destFile, {
               access: 'private',
               handleUploadUrl: '/api/upload-token',
-              contentType: destFile.type || 'application/octet-stream'
+              multipart: true,
+              contentType: destFile.type || 'application/octet-stream',
+              onUploadProgress: (progress) => {
+                setStatusMessage(`2/3 Uploading target template to secure storage (${progress.percentage.toFixed(0)}%)...`);
+              }
             });
             finalBlobUrl = blob.url;
             finalPathname = blob.pathname;

@@ -1,3 +1,4 @@
+import { handleUpload } from '@vercel/blob/client';
 import { issueSignedToken, presignUrl, parseStoreIdFromDelegationToken } from '@vercel/blob';
 
 // Auto-alias store-prefixed Vercel Blob environment variables if standard names are missing
@@ -27,9 +28,7 @@ export default async function handler(request, response) {
 
   ensureBlobEnv();
 
-  const envKeys = Object.keys(process.env).filter(k => k.includes('BLOB') || k.includes('OIDC') || k.includes('VERCEL'));
   console.log('[UPLOAD_AUTH_ENDPOINT_CALLED] Route: /api/upload-token');
-  console.log(`[BLOB_DIAGNOSTICS] Available Blob/Vercel Env Keys: [${envKeys.join(', ')}]`);
 
   try {
     let body;
@@ -43,11 +42,47 @@ export default async function handler(request, response) {
       body = request.body || {};
     }
 
-    const rawFilename = body.payload?.pathname || body.filename || `manuscript_${Date.now()}.zip`;
+    // 1. If this is an official @vercel/blob/client SDK token generation / event request
+    if (body && body.type) {
+      console.log(`[BLOB_CLIENT_EVENT] Handling client SDK upload event: ${body.type}`);
+      const jsonResponse = await handleUpload({
+        body,
+        request,
+        token: process.env.BLOB_READ_WRITE_TOKEN,
+        onBeforeGenerateToken: async (pathname, clientPayload) => {
+          const rawFilename = pathname || clientPayload || `manuscript_${Date.now()}.docx`;
+          const cleanFilename = String(rawFilename).split(/[\/\\]/).pop().replace(/[^a-zA-Z0-9._-]/g, '_');
+          const targetPath = `uploads/${Date.now()}_${cleanFilename}`;
+          console.log(`[BLOB_TOKEN_GENERATION] Authorized target path: ${targetPath} (up to 500 MB / multipart 5 TB)`);
+          return {
+            allowedContentTypes: [
+              'application/zip',
+              'application/x-zip-compressed',
+              'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+              'application/x-tex',
+              'text/plain',
+              'application/pdf',
+              'application/octet-stream'
+            ],
+            maximumSizeInBytes: 500 * 1024 * 1024,
+            addRandomSuffix: false,
+            pathname: targetPath
+          };
+        },
+        onUploadCompleted: async ({ blob }) => {
+          console.log(`[BLOB_UPLOAD_COMPLETED] File upload complete: ${blob.url}`);
+        }
+      });
+
+      return response.status(200).json(jsonResponse);
+    }
+
+    // 2. Direct presigned PUT fallback for legacy clients
+    const rawFilename = body.payload?.pathname || body.filename || `manuscript_${Date.now()}.docx`;
     const cleanFilename = String(rawFilename).split(/[\/\\]/).pop().replace(/[^a-zA-Z0-9._-]/g, '_');
     const pathname = `uploads/${Date.now()}_${cleanFilename}`;
 
-    console.log(`[UPLOAD_REQUESTED] filename: ${cleanFilename}, pathname: ${pathname}`);
+    console.log(`[LEGACY_UPLOAD_REQUESTED] filename: ${cleanFilename}, pathname: ${pathname}`);
 
     const commandOptions = {};
     if (process.env.BLOB_READ_WRITE_TOKEN) {
@@ -66,7 +101,7 @@ export default async function handler(request, response) {
         'application/pdf',
         'application/octet-stream'
       ],
-      maximumSizeInBytes: 100 * 1024 * 1024,
+      maximumSizeInBytes: 500 * 1024 * 1024,
       ...commandOptions,
     });
 
@@ -100,32 +135,19 @@ export default async function handler(request, response) {
 
     const canonicalBlobUrl = `https://${storeId}.private.blob.vercel-storage.com/${pathname}`;
 
-    console.log(`[BLOB_AUTH_SUCCESS] Generated token & URLs for pathname: ${pathname}`);
+    console.log(`[LEGACY_BLOB_AUTH_SUCCESS] Generated URLs for pathname: ${pathname}`);
 
-    const responsePayload = {
+    return response.status(200).json({
       uploadUrl,
       downloadUrl,
       presignedUrl: uploadUrl,
       pathname,
-      blobUrl: canonicalBlobUrl
-    };
-
-    if (clientToken) {
-      responsePayload.clientToken = clientToken;
-    }
-
-    if (body && (body.type === 'blob.generate-client-token' || body.type === 'blob.upload-completed')) {
-      responsePayload.type = body.type;
-    }
-
-    return response.status(200).json(responsePayload);
+      blobUrl: canonicalBlobUrl,
+      clientToken
+    });
 
   } catch (error) {
     console.error('[BLOB_AUTH_ERROR] Client upload authorization failed:', error.name, error.message);
-    if (error.stack) {
-      console.error('[BLOB_AUTH_STACK]', error.stack.split('\n').slice(0, 5).join('\n'));
-    }
-
     return response.status(500).json({
       error: 'STORAGE_AUTHORIZATION_ERROR',
       message: 'Secure large-file storage authorization failed. Please retry.',
