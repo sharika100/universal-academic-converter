@@ -1,4 +1,4 @@
-import { del, list } from '@vercel/blob';
+const { del, list } = require('@vercel/blob');
 
 function ensureBlobEnv() {
   if (!process.env.BLOB_READ_WRITE_TOKEN) {
@@ -12,8 +12,9 @@ function ensureBlobEnv() {
 }
 
 function isAuthorized(request) {
-  const cronHeader = request.headers['x-vercel-cron'] || request.headers['X-Vercel-Cron'];
-  const internalSecret = request.headers['x-internal-delete-key'] || request.headers['X-Internal-Delete-Key'] || '';
+  const headers = request.headers || {};
+  const cronHeader = headers['x-vercel-cron'] || headers['X-Vercel-Cron'];
+  const internalSecret = headers['x-internal-delete-key'] || headers['X-Internal-Delete-Key'] || '';
   const token = process.env.BLOB_READ_WRITE_TOKEN;
 
   // 1. Allow Vercel Cron invocation
@@ -34,7 +35,7 @@ function isUploadsNamespace(urlOrPathname) {
   return urlOrPathname.includes('/uploads/') || urlOrPathname.startsWith('uploads/');
 }
 
-export default async function handler(request, response) {
+module.exports = async function handler(request, response) {
   ensureBlobEnv();
 
   // SECURITY CHECK: Verify caller authorization (must originate from internal backend or Vercel Cron)
@@ -56,7 +57,6 @@ export default async function handler(request, response) {
       const deleted = [];
 
       for (const blob of listRes.blobs || []) {
-        // SCOPE RESTRICTION: Only touch files inside uploads/ namespace
         if (!isUploadsNamespace(blob.pathname) && !isUploadsNamespace(blob.url)) {
           continue;
         }
@@ -98,17 +98,18 @@ export default async function handler(request, response) {
     return response.status(400).json({ error: 'Missing url or pathname' });
   }
 
-  // SCOPE RESTRICTION: Deletion strictly restricted to uploads/ namespace
+  // Enforce SCOPE RESTRICTION for specific object deletions
   if (!isUploadsNamespace(blobUrlOrPathname)) {
-    return response.status(403).json({ error: 'Deletion restricted strictly to temporary uploads/ namespace.' });
+    console.warn(`[BLOB_DELETE_REJECTED] Attempted deletion outside uploads/ namespace: ${blobUrlOrPathname}`);
+    return response.status(403).json({ error: 'Deletion scope restricted to uploads/ namespace.' });
   }
 
   try {
     await del(blobUrlOrPathname, options);
-    console.log(`[TEMPORARY_BLOB_DELETED] Successfully deleted temporary Blob object in uploads/ namespace.`);
-    return response.status(200).json({ success: true, deleted: true });
+    console.log(`[BLOB_DELETED_SUCCESS] Deleted temporary Blob object: ${blobUrlOrPathname}`);
+    return response.status(200).json({ success: true, deleted: blobUrlOrPathname });
   } catch (err) {
-    console.warn(`[TEMPORARY_BLOB_DELETE_ERROR] Could not delete Blob (${err.message}).`);
-    return response.status(200).json({ success: false, error: err.message });
+    console.error(`[BLOB_DELETE_ERROR] Failed to delete Blob object '${blobUrlOrPathname}': ${err.message}`);
+    return response.status(500).json({ error: 'STORAGE_DELETE_FAILED', detail: err.message });
   }
-}
+};

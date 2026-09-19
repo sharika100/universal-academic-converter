@@ -1,4 +1,4 @@
-import { get } from '@vercel/blob';
+const { get } = require('@vercel/blob');
 
 function ensureBlobEnv() {
   if (!process.env.BLOB_READ_WRITE_TOKEN) {
@@ -9,17 +9,9 @@ function ensureBlobEnv() {
       }
     }
   }
-  if (!process.env.BLOB_STORE_ID) {
-    for (const [key, val] of Object.entries(process.env)) {
-      if ((key.endsWith('_STORE_ID') || key.includes('BLOB_STORE_ID')) && typeof val === 'string' && val.trim() !== '') {
-        process.env.BLOB_STORE_ID = val.trim();
-        break;
-      }
-    }
-  }
 }
 
-export default async function handler(request, response) {
+module.exports = async function handler(request, response) {
   if (request.method !== 'GET') {
     return response.status(405).json({ error: 'Method not allowed' });
   }
@@ -40,7 +32,7 @@ export default async function handler(request, response) {
       safePathname = blobUrlOrPathname;
     }
   } catch {
-    safePathname = blobUrlOrPathname.slice(0, 50);
+    safePathname = String(blobUrlOrPathname).slice(0, 50);
   }
 
   console.log(`[BLOB_RETRIEVAL_ATTEMPTED] target: ${safePathname}`);
@@ -55,7 +47,7 @@ export default async function handler(request, response) {
     }
 
     const result = await get(blobUrlOrPathname, options);
-    if (!result || !result.stream) {
+    if (!result) {
       console.log(`[BLOB_RETRIEVAL_RESULT] status: 404, target: ${safePathname}`);
       return response.status(404).json({
         error: 'STORAGE_OBJECT_NOT_FOUND',
@@ -64,21 +56,28 @@ export default async function handler(request, response) {
       });
     }
 
-    console.log(`[BLOB_RETRIEVAL_RESULT] status: 200, target: ${safePathname}, size: ${result.blob?.size || 'unknown'}`);
-
-    const contentType = result.blob?.contentType || 'application/octet-stream';
-    const reader = result.stream.getReader();
-    const chunks = [];
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
+    if (result.url || result.downloadUrl) {
+      const targetUrl = result.url || result.downloadUrl;
+      console.log(`[BLOB_RETRIEVAL_REDIRECT] status: 302, redirecting to presigned URL for: ${safePathname}`);
+      return response.redirect(302, targetUrl);
     }
-    const buffer = Buffer.concat(chunks);
 
-    response.setHeader('Content-Type', contentType);
-    response.setHeader('Content-Length', buffer.length);
-    return response.status(200).send(buffer);
+    if (result.stream) {
+      const contentType = result.blob?.contentType || 'application/octet-stream';
+      const reader = result.stream.getReader();
+      const chunks = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+      }
+      const buffer = Buffer.concat(chunks);
+      response.setHeader('Content-Type', contentType);
+      response.setHeader('Content-Length', buffer.length);
+      return response.status(200).send(buffer);
+    }
+
+    return response.status(404).json({ error: 'STORAGE_OBJECT_NOT_FOUND', message: 'No download stream available.' });
   } catch (error) {
     console.error(`[BLOB_RETRIEVAL_RESULT] status: 500, error: ${error.message}`);
     return response.status(500).json({
@@ -87,4 +86,4 @@ export default async function handler(request, response) {
       detail: error.message || 'Failed to download private blob'
     });
   }
-}
+};
