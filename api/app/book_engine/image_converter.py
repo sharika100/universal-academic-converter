@@ -6,7 +6,8 @@ from PIL import Image
 
 logger = logging.getLogger("BookImageConverter")
 
-UNSUPPORTED_LATEX_EXTENSIONS = {".emf", ".wmf", ".tif", ".tiff", ".bmp"}
+SUPPORTED_LATEX_EXTENSIONS = {".png", ".jpg", ".jpeg", ".pdf", ".eps"}
+UNSUPPORTED_LATEX_EXTENSIONS = {".emf", ".wmf", ".tif", ".tiff", ".bmp", ".gif", ".webp", ".svg", ".ico"}
 
 def is_unsupported_latex_image(filename_or_ext: str) -> bool:
     if not filename_or_ext:
@@ -15,18 +16,20 @@ def is_unsupported_latex_image(filename_or_ext: str) -> bool:
         ext = filename_or_ext.lower()
     else:
         ext = os.path.splitext(filename_or_ext)[1].lower()
-    return ext in UNSUPPORTED_LATEX_EXTENSIONS
+    if not ext:
+        return True
+    return ext not in SUPPORTED_LATEX_EXTENSIONS
 
 def get_latex_compatible_filename(filename: str) -> str:
     if not filename:
         return filename
     if filename.startswith("."):
         ext = filename.lower()
-        if ext in UNSUPPORTED_LATEX_EXTENSIONS:
+        if ext not in SUPPORTED_LATEX_EXTENSIONS:
             return ".png"
         return filename
     base, ext = os.path.splitext(filename)
-    if ext.lower() in UNSUPPORTED_LATEX_EXTENSIONS:
+    if not ext or ext.lower() not in SUPPORTED_LATEX_EXTENSIONS:
         return f"{base}.png"
     return filename
 
@@ -152,17 +155,21 @@ def _render_emf_vector_to_png(emf_bytes: bytes, width_px: int = 1200, height_px:
 
 def convert_image_to_latex_compatible(img_bytes: bytes, original_filename_or_ext: str = ".emf") -> Tuple[bytes, str]:
     """
-    Converts unsupported image formats (such as EMF/WMF) to a 100% valid LaTeX-compatible PNG format.
+    Converts unsupported image formats (such as EMF/WMF/GIF/BMP/WEBP) to a 100% valid LaTeX-compatible PNG format.
     Returns (converted_bytes, target_extension).
     """
     if not img_bytes:
-        return img_bytes, original_filename_or_ext
+        return img_bytes, ".png"
 
-    orig_ext = os.path.splitext(original_filename_or_ext)[1].lower() if "." in original_filename_or_ext else original_filename_or_ext.lower()
-    if not orig_ext.startswith("."):
-        orig_ext = f".{orig_ext}"
+    if original_filename_or_ext.startswith("."):
+        orig_ext = original_filename_or_ext.lower()
+    else:
+        orig_ext = os.path.splitext(original_filename_or_ext)[1].lower()
 
-    if orig_ext not in UNSUPPORTED_LATEX_EXTENSIONS:
+    if not orig_ext:
+        orig_ext = ".emf"
+
+    if orig_ext in SUPPORTED_LATEX_EXTENSIONS:
         return img_bytes, orig_ext
 
     # 1. Primary Method: Pillow Image.open

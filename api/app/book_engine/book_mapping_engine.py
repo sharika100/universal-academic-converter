@@ -143,6 +143,12 @@ class BookMappingEngine:
                     latex = blk.get("math_latex") if isinstance(blk, dict) else getattr(blk, "math_latex", "")
                     lbl = blk.get("label") if isinstance(blk, dict) else getattr(blk, "label", "")
                     if latex:
+                        if "\\includegraphics" in latex:
+                            latex = re.sub(
+                                r'figures/([^}\s]+)',
+                                lambda m: f"figures/{get_latex_compatible_filename(m.group(1))}",
+                                latex
+                            )
                         eq_str = "\\begin{equation}\n" + latex + "\n"
                         if lbl:
                             eq_str += f"\\label{{{lbl}}}\n"

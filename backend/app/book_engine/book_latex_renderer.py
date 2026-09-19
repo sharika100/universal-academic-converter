@@ -49,7 +49,7 @@ class BookLatexRenderer:
                         fig_idx += 1
                     try:
                         img_bytes = base64.b64decode(b64_data)
-                        orig_ext = os.path.splitext(raw_fname)[1].lower()
+                        orig_ext = os.path.splitext(raw_fname)[1].lower() if "." in raw_fname else ".emf"
 
                         is_png = img_bytes.startswith(b"\x89PNG\r\n\x1a\n")
                         is_jpeg = img_bytes.startswith(b"\xff\xd8\xff")
@@ -58,8 +58,8 @@ class BookLatexRenderer:
                         if is_png or is_jpeg or is_pdf:
                             target_fname = get_latex_compatible_filename(raw_fname)
                         else:
-                            img_bytes, out_ext = convert_image_to_latex_compatible(img_bytes, orig_ext or ".emf")
-                            base_name = os.path.splitext(raw_fname)[0]
+                            img_bytes, out_ext = convert_image_to_latex_compatible(img_bytes, raw_fname or ".emf")
+                            base_name = os.path.splitext(raw_fname)[0] if "." in raw_fname else raw_fname
                             target_fname = f"{base_name}{out_ext}"
 
                         if target_fname.lower().endswith(".png"):
@@ -68,8 +68,11 @@ class BookLatexRenderer:
                                     test_im.verify()
                             except Exception:
                                 img_bytes, out_ext = convert_image_to_latex_compatible(img_bytes, ".emf")
-                                base_name = os.path.splitext(raw_fname)[0]
+                                base_name = os.path.splitext(raw_fname)[0] if "." in raw_fname else raw_fname
                                 target_fname = f"{base_name}{out_ext}"
+
+                        if not os.path.splitext(target_fname)[1]:
+                            target_fname = f"{target_fname}.png"
 
                         img_path = os.path.join(fig_dir, target_fname)
                         with open(img_path, "wb") as fh:
@@ -110,7 +113,57 @@ class BookLatexRenderer:
         main_tex_content = BookLatexRenderer._assemble_main_tex(mapped, spec)
         
         # Enforce LaTeX-compatible image file extensions in main.tex
-        main_tex_content = re.sub(r'figures/([^}\s]*?)\.(emf|wmf|tif|tiff|bmp)', r'figures/\1.png', main_tex_content, flags=re.I)
+        main_tex_content = re.sub(r'figures/([^}\s]*?)\.(emf|wmf|tif|tiff|bmp|gif|webp|svg|ico)', r'figures/\1.png', main_tex_content, flags=re.I)
+
+        # Automated Package Integrity Check: referenced image -> file exists -> valid image -> usable by LaTeX
+        inc_refs = re.findall(r'\\includegraphics(?:\[.*?\])?\{([^}]*)\}', main_tex_content)
+        for ref in inc_refs:
+            clean_ref = ref.strip().replace('/', os.sep)
+            abs_ref_path = os.path.join(output_dir, clean_ref)
+
+            if not os.path.exists(abs_ref_path):
+                base_no_ext = os.path.splitext(abs_ref_path)[0]
+                dir_name = os.path.dirname(abs_ref_path)
+                alt_found = False
+                if os.path.exists(dir_name):
+                    for existing_file in os.listdir(dir_name):
+                        existing_abs = os.path.join(dir_name, existing_file)
+                        if existing_abs == base_no_ext or os.path.splitext(existing_abs)[0] == base_no_ext:
+                            try:
+                                with open(existing_abs, "rb") as efh:
+                                    e_bytes = efh.read()
+                                converted_bytes, _ = convert_image_to_latex_compatible(e_bytes, ".emf")
+                                with open(abs_ref_path, "wb") as o_fh:
+                                    o_fh.write(converted_bytes)
+                                alt_found = True
+                                logger.info(f"Fixed missing image reference {ref} from {existing_file}")
+                                break
+                            except Exception as cv_err:
+                                logger.warning(f"Failed converting alternate image {existing_file}: {cv_err}")
+
+                if not alt_found:
+                    fb_buf = io.BytesIO()
+                    fb_img = Image.new("RGBA", (400, 300), (240, 240, 240, 255))
+                    fb_img.save(fb_buf, format="PNG")
+                    os.makedirs(os.path.dirname(abs_ref_path), exist_ok=True)
+                    with open(abs_ref_path, "wb") as o_fh:
+                        o_fh.write(fb_buf.getvalue())
+                    logger.error(f"Created fallback PNG for missing referenced image: {ref}")
+
+            try:
+                with Image.open(abs_ref_path) as test_im:
+                    test_im.verify()
+            except Exception:
+                fb_buf = io.BytesIO()
+                fb_img = Image.new("RGBA", (400, 300), (240, 240, 240, 255))
+                fb_img.save(fb_buf, format="PNG")
+                with open(abs_ref_path, "wb") as o_fh:
+                    o_fh.write(fb_buf.getvalue())
+                logger.error(f"Replaced invalid image file {ref} with valid PNG")
+
+            rel_created_path = os.path.relpath(abs_ref_path, output_dir).replace('\\', '/')
+            if rel_created_path not in created_files:
+                created_files.append(rel_created_path)
 
         main_tex_path = os.path.join(output_dir, "main.tex")
         with open(main_tex_path, "w", encoding="utf-8") as fh:
