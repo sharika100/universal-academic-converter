@@ -166,6 +166,16 @@ class BookTemplateStorageAnalysisRequest(BaseModel):
     filename: Optional[str] = None
     sha256: Optional[str] = None
 
+def strip_udm_b64(obj: Any):
+    if isinstance(obj, dict):
+        if 'image_data_b64' in obj:
+            obj['image_data_b64'] = None
+        for v in obj.values():
+            strip_udm_b64(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            strip_udm_b64(item)
+
 @router.post("/analyze-source")
 async def analyze_book_source(
     file: UploadFile = File(...)
@@ -192,13 +202,19 @@ async def analyze_book_source(
         else:
             raise HTTPException(status_code=400, detail="Unsupported manuscript format. Use .docx or .zip")
 
-        udm_json_str = udm.model_dump_json()
+        udm_dict = udm.model_dump()
+        udm_json_str = json.dumps(udm_dict)
         udm_json_path = os.path.join(job_dir, "source_udm.json")
         with open(udm_json_path, "w", encoding="utf-8") as fh:
             fh.write(udm_json_str)
 
+        import copy
+        udm_dict_stripped = copy.deepcopy(udm_dict)
+        strip_udm_b64(udm_dict_stripped)
+        udm_stripped_json_str = json.dumps(udm_dict_stripped)
+
         udm_pathname = f"udm_state/{job_id}_source_udm.json"
-        udm_blob = put_blob_bytes(udm_pathname, udm_json_str.encode("utf-8"))
+        udm_blob = put_blob_bytes(udm_pathname, udm_stripped_json_str.encode("utf-8"))
         udm_blob_url = udm_blob.get("url") if udm_blob else None
         udm_download_url = udm_blob.get("downloadUrl") if udm_blob else None
         if udm_blob and udm_blob.get("pathname"):
@@ -207,7 +223,7 @@ async def analyze_book_source(
         return JSONResponse({
             "job_id": job_id,
             "status": "SUCCESS",
-            "udm": udm.model_dump(),
+            "udm": udm_dict_stripped,
             "udm_blob_url": udm_blob_url,
             "udm_download_url": udm_download_url,
             "udm_pathname": udm_pathname,
@@ -248,13 +264,19 @@ async def analyze_book_source_from_storage(req: BookStorageAnalysisRequest):
         else:
             raise HTTPException(status_code=400, detail="Unsupported manuscript format. Use .docx or .zip")
 
-        udm_json_str = udm.model_dump_json()
+        udm_dict = udm.model_dump()
+        udm_json_str = json.dumps(udm_dict)
         udm_json_path = os.path.join(job_dir, "source_udm.json")
         with open(udm_json_path, "w", encoding="utf-8") as fh:
             fh.write(udm_json_str)
 
+        import copy
+        udm_dict_stripped = copy.deepcopy(udm_dict)
+        strip_udm_b64(udm_dict_stripped)
+        udm_stripped_json_str = json.dumps(udm_dict_stripped)
+
         udm_pathname = f"udm_state/{job_id}_source_udm.json"
-        udm_blob = put_blob_bytes(udm_pathname, udm_json_str.encode("utf-8"))
+        udm_blob = put_blob_bytes(udm_pathname, udm_stripped_json_str.encode("utf-8"))
         udm_blob_url = udm_blob.get("url") if udm_blob else None
         udm_download_url = udm_blob.get("downloadUrl") if udm_blob else None
         if udm_blob and udm_blob.get("pathname"):
@@ -263,7 +285,7 @@ async def analyze_book_source_from_storage(req: BookStorageAnalysisRequest):
         return JSONResponse({
             "job_id": job_id,
             "status": "SUCCESS",
-            "udm": udm.model_dump(),
+            "udm": udm_dict_stripped,
             "udm_blob_url": udm_blob_url,
             "udm_download_url": udm_download_url,
             "udm_pathname": udm_pathname,

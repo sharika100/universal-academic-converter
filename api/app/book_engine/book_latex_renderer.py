@@ -36,12 +36,41 @@ class BookLatexRenderer:
                         if f not in created_files:
                             created_files.append(f)
 
+        # Build image map from source manuscript in job_dir if b64_data was stripped for storage optimization
+        source_image_map = {}
+        parent_dir = os.path.dirname(output_dir)
+        if parent_dir and os.path.exists(parent_dir):
+            for root_d, _, files_d in os.walk(parent_dir):
+                for fd in files_d:
+                    if fd.startswith("source_") and fd.endswith(".docx"):
+                        try:
+                            import docx
+                            from app.parsers.docx_parser import DocxParser
+                            sdoc = docx.Document(os.path.join(root_d, fd))
+                            rel_map = DocxParser._extract_images(sdoc)
+                            for rId, img_info in rel_map.items():
+                                if img_info.get("b64"):
+                                    source_image_map[rId] = img_info["b64"]
+                                    if img_info.get("media_path"):
+                                        source_image_map[img_info["media_path"]] = img_info["b64"]
+                                    if img_info.get("sha256"):
+                                        source_image_map[img_info["sha256"]] = img_info["b64"]
+                        except Exception as sdoc_err:
+                            logger.warning(f"Could not extract images from source docx package: {sdoc_err}")
+
         fig_dir = os.path.join(output_dir, "figures")
         os.makedirs(fig_dir, exist_ok=True)
         fig_idx = 1
         for sec in udm.sections:
             for blk in sec.blocks:
                 b64_data = blk.get("image_data_b64") if isinstance(blk, dict) else getattr(blk, "image_data_b64", None)
+                rel_id = blk.get("rel_id") if isinstance(blk, dict) else getattr(blk, "rel_id", None)
+                sha256 = blk.get("sha256") if isinstance(blk, dict) else getattr(blk, "sha256", None)
+                media_path = blk.get("media_path") if isinstance(blk, dict) else getattr(blk, "media_path", None)
+
+                if not b64_data and source_image_map:
+                    b64_data = source_image_map.get(rel_id) or source_image_map.get(media_path) or source_image_map.get(sha256)
+
                 raw_fname = blk.get("image_filename") if isinstance(blk, dict) else getattr(blk, "image_filename", "")
                 if b64_data:
                     if not raw_fname:
