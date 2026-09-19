@@ -61,12 +61,19 @@ export const BookConverterPage: React.FC = () => {
       return;
     }
 
-    setAnalyzing(true);
+    // Immediately clear previous conversion result, job ID, specs, and errors on new attempt
+    setReport(null);
+    setJobId(null);
+    setSourceUdm(null);
+    setDestSpec(null);
     setErrorMessage(null);
+
+    setAnalyzing(true);
     setStatusMessage("1/3 Analyzing source manuscript...");
 
     const LARGE_FILE_THRESHOLD = 3.5 * 1024 * 1024; // 3.5 MB threshold below Vercel 4.5 MB limit
-    let currentJobId = jobId || `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const attemptId = Math.random().toString(36).substring(2, 9);
+    let currentJobId = `job_${Date.now()}_${attemptId}`;
 
     try {
       // 1. Analyze Source
@@ -82,27 +89,34 @@ export const BookConverterPage: React.FC = () => {
           let downloadUrl = '';
 
           try {
-            const uploadPath = `uploads/${Date.now()}_${sourceFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+            const cleanName = sourceFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+            const uploadPath = `uploads/${Date.now()}_${attemptId}_${cleanName}`;
             const blob = await upload(uploadPath, sourceFile, {
               access: 'private',
               handleUploadUrl: '/api/upload-token',
+              clientPayload: JSON.stringify({ addRandomSuffix: true }),
               multipart: true,
+              addRandomSuffix: true,
               contentType: sourceFile.type || 'application/octet-stream',
-              onUploadProgress: (progress) => {
+              onUploadProgress: (progress: any) => {
                 setStatusMessage(`1/3 Uploading manuscript to secure storage (${progress.percentage.toFixed(0)}%)...`);
               }
-            });
+            } as any);
             finalBlobUrl = blob.url;
             finalPathname = blob.pathname;
             downloadUrl = (blob as any).downloadUrl || blob.url;
           } catch (sdkErr: any) {
             console.warn("Client SDK upload failed, attempting presigned PUT fallback:", sdkErr?.message || sdkErr);
+            const cleanName = sourceFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+            const fallbackPathname = `uploads/${Date.now()}_${attemptId}_${cleanName}`;
             const authRes = await fetch('/api/upload-token', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
+                pathname: fallbackPathname,
                 filename: sourceFile.name,
-                contentType: sourceFile.type || 'application/octet-stream'
+                contentType: sourceFile.type || 'application/octet-stream',
+                addRandomSuffix: true
               })
             });
 
@@ -192,24 +206,30 @@ export const BookConverterPage: React.FC = () => {
           let downloadUrl = '';
 
           try {
-            const destUploadPath = `uploads/${Date.now()}_${destFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+            const cleanTmplName = destFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+            const destUploadPath = `uploads/${Date.now()}_${attemptId}_${cleanTmplName}`;
             const blob = await upload(destUploadPath, destFile, {
               access: 'private',
               handleUploadUrl: '/api/upload-token',
+              clientPayload: JSON.stringify({ addRandomSuffix: true }),
               multipart: true,
+              addRandomSuffix: true,
               contentType: destFile.type || 'application/octet-stream',
-              onUploadProgress: (progress) => {
+              onUploadProgress: (progress: any) => {
                 setStatusMessage(`2/3 Uploading target template to secure storage (${progress.percentage.toFixed(0)}%)...`);
               }
-            });
+            } as any);
             finalBlobUrl = blob.url;
             finalPathname = blob.pathname;
             downloadUrl = (blob as any).downloadUrl || blob.url;
           } catch (sdkErr: any) {
+            const cleanTmplName = destFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+            const fallbackTmplPath = `uploads/${Date.now()}_${attemptId}_${cleanTmplName}`;
             const authRes = await fetch('/api/upload-token', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
+                pathname: fallbackTmplPath,
                 filename: destFile.name,
                 contentType: destFile.type || 'application/octet-stream'
               })
@@ -326,6 +346,9 @@ export const BookConverterPage: React.FC = () => {
 
     } catch (err: any) {
       console.error("Book conversion error:", err);
+      // Ensure previous report and job_id are reset to null so UI hides completion card
+      setReport(null);
+      setJobId(null);
       setErrorMessage(err.message || "An unexpected error occurred during book conversion.");
     } finally {
       setAnalyzing(false);
@@ -470,7 +493,7 @@ export const BookConverterPage: React.FC = () => {
         )}
 
         {/* Output & Download Card */}
-        {report && (
+        {report && jobId && (
           <div className="report-section">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #1E293B', paddingBottom: '16px', marginBottom: '16px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>

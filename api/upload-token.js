@@ -37,6 +37,8 @@ module.exports = async function handler(request, response) {
 
     const pathname = body.payload?.pathname || body.pathname || body.filename || `uploads/${Date.now()}_manuscript.docx`;
 
+    const addRandomSuffix = body.payload?.addRandomSuffix ?? true;
+
     const clientToken = await generateClientTokenFromReadWriteToken({
       pathname,
       allowedContentTypes: [
@@ -49,7 +51,7 @@ module.exports = async function handler(request, response) {
         'application/octet-stream'
       ],
       maximumSizeInBytes: 500 * 1024 * 1024, // 500 MB (up to 5 TB with multipart)
-      addRandomSuffix: false,
+      addRandomSuffix,
       validUntil: Date.now() + 30 * 60 * 1000, // 30 minutes validity window for multi-part uploads
       token: rwToken
     });
@@ -88,7 +90,7 @@ module.exports = async function handler(request, response) {
       operation: 'put',
       pathname,
       access: 'private',
-      addRandomSuffix: false,
+      addRandomSuffix,
       token: rwToken
     });
 
