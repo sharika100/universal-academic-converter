@@ -90,7 +90,7 @@ module.exports = async function handler(request, response) {
       operation: 'put',
       pathname,
       access: 'private',
-      addRandomSuffix,
+      addRandomSuffix: false,
       token: rwToken
     });
 
