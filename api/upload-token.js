@@ -1,5 +1,5 @@
-import { generateClientTokenFromReadWriteToken, parseStoreIdFromDelegationToken } from '@vercel/blob/client';
-import { issueSignedToken, presignUrl } from '@vercel/blob';
+const { generateClientTokenFromReadWriteToken, parseStoreIdFromDelegationToken } = require('@vercel/blob/client');
+const { issueSignedToken, presignUrl } = require('@vercel/blob');
 
 // Auto-alias store-prefixed Vercel Blob environment variables if standard names are missing
 function ensureBlobEnv() {
@@ -21,7 +21,7 @@ function ensureBlobEnv() {
   }
 }
 
-export default async function handler(request, response) {
+module.exports = async function handler(request, response) {
   if (request.method !== 'POST') {
     return response.status(405).json({ error: 'Method not allowed' });
   }
@@ -138,4 +138,4 @@ export default async function handler(request, response) {
       message: error.message || 'Secure large-file storage authorization failed.'
     });
   }
-}
+};
