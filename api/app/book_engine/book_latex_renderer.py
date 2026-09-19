@@ -191,7 +191,7 @@ class BookLatexRenderer:
             lines.append(clean_preamble.strip())
         else:
             lines.append("\\documentclass[11pt,a4paper]{book}")
-            lines.append("\\usepackage[utf8]{utf8}")
+            lines.append("\\usepackage[utf8]{inputenc}")
             lines.append("\\usepackage{graphicx}")
             lines.append("\\usepackage{booktabs}")
             lines.append("\\usepackage{amsmath,amssymb}")
