@@ -56,35 +56,48 @@ MATH_CMDS = {
     r'\Delta', r'\Sigma', r'\Omega'
 }
 
+PROTECTED_PATTERN = re.compile(
+    r'(\$[^\$]+\$|\\(?:includegraphics|label|cite|ref|pageref|url|href|begin|end|usepackage|UsePackage|documentclass|input|include)(?:\[[^\]]*\])?\{[^{}]*\}|\\[a-zA-Z]+)'
+)
+
+def escape_plain_text(s: str) -> str:
+    s = re.sub(r'(?<!\\)&', r'\&', s)
+    s = re.sub(r'(?<!\\)%', r'\%', s)
+    s = re.sub(r'(?<!\\)_', r'\_', s)
+    s = re.sub(r'(?<!\\)#', r'\#', s)
+    return s
+
 def clean_latex_text(text: str) -> str:
     if not text:
         return ""
 
-    if not text.startswith("\\"):
-        parts = text.split('$')
-        new_parts = []
-        for idx, part in enumerate(parts):
-            in_math = (idx % 2 == 1)
-            part_str = part
-            for char, repl in UNICODE_LATEX_MAP.items():
-                if char in part_str:
-                    if repl in MATH_CMDS:
-                        if in_math:
-                            part_str = part_str.replace(char, f" {repl} ")
-                        else:
-                            part_str = part_str.replace(char, f"${repl}$")
+    parts = text.split('$')
+    new_parts = []
+    for idx, part in enumerate(parts):
+        in_math = (idx % 2 == 1)
+        part_str = part
+        for char, repl in UNICODE_LATEX_MAP.items():
+            if char in part_str:
+                if repl in MATH_CMDS:
+                    if in_math:
+                        part_str = part_str.replace(char, f" {repl} ")
                     else:
-                        part_str = part_str.replace(char, repl)
-            new_parts.append(part_str)
-        text = '$'.join(new_parts)
+                        part_str = part_str.replace(char, f"${repl}$")
+                else:
+                    part_str = part_str.replace(char, repl)
+        new_parts.append(part_str)
+    text = '$'.join(new_parts)
 
-    if not text.startswith("\\") and not text.startswith("$"):
-        text = re.sub(r'(?<!\\)&', r'\&', text)
-        text = re.sub(r'(?<!\\)%', r'\%', text)
-        text = re.sub(r'(?<!\\)_', r'\_', text)
-        text = re.sub(r'(?<!\\)#', r'\#', text)
-
-    return text
+    tokens = PROTECTED_PATTERN.split(text)
+    res = []
+    for tok in tokens:
+        if not tok:
+            continue
+        if PROTECTED_PATTERN.fullmatch(tok):
+            res.append(tok)
+        else:
+            res.append(escape_plain_text(tok))
+    return ''.join(res)
 
 class BookMappingEngine:
     @staticmethod
