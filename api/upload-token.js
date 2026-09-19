@@ -68,9 +68,6 @@ export default async function handler(request, response) {
             addRandomSuffix: false,
             pathname: targetPath
           };
-        },
-        onUploadCompleted: async ({ blob }) => {
-          console.log(`[BLOB_UPLOAD_COMPLETED] File upload complete: ${blob.url}`);
         }
       });
 
