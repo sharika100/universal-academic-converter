@@ -203,15 +203,14 @@ async def analyze_book_source(
             raise HTTPException(status_code=400, detail="Unsupported manuscript format. Use .docx or .zip")
 
         udm_dict = udm.model_dump()
-        udm_json_str = json.dumps(udm_dict)
-        udm_json_path = os.path.join(job_dir, "source_udm.json")
-        with open(udm_json_path, "w", encoding="utf-8") as fh:
-            fh.write(udm_json_str)
-
         import copy
         udm_dict_stripped = copy.deepcopy(udm_dict)
         strip_udm_b64(udm_dict_stripped)
         udm_stripped_json_str = json.dumps(udm_dict_stripped)
+
+        udm_json_path = os.path.join(job_dir, "source_udm.json")
+        with open(udm_json_path, "w", encoding="utf-8") as fh:
+            fh.write(udm_stripped_json_str)
 
         udm_pathname = f"udm_state/{job_id}_source_udm.json"
         udm_blob = put_blob_bytes(udm_pathname, udm_stripped_json_str.encode("utf-8"))
@@ -265,15 +264,20 @@ async def analyze_book_source_from_storage(req: BookStorageAnalysisRequest):
             raise HTTPException(status_code=400, detail="Unsupported manuscript format. Use .docx or .zip")
 
         udm_dict = udm.model_dump()
-        udm_json_str = json.dumps(udm_dict)
-        udm_json_path = os.path.join(job_dir, "source_udm.json")
-        with open(udm_json_path, "w", encoding="utf-8") as fh:
-            fh.write(udm_json_str)
-
         import copy
         udm_dict_stripped = copy.deepcopy(udm_dict)
         strip_udm_b64(udm_dict_stripped)
         udm_stripped_json_str = json.dumps(udm_dict_stripped)
+
+        udm_json_path = os.path.join(job_dir, "source_udm.json")
+        with open(udm_json_path, "w", encoding="utf-8") as fh:
+            fh.write(udm_stripped_json_str)
+
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as rm_err:
+                logger.warning(f"Could not remove source file {file_path}: {rm_err}")
 
         udm_pathname = f"udm_state/{job_id}_source_udm.json"
         udm_blob = put_blob_bytes(udm_pathname, udm_stripped_json_str.encode("utf-8"))
