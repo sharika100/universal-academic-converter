@@ -164,8 +164,13 @@ MATH_CMDS = {
     r'\Gamma', r'\Delta', r'\Theta', r'\Lambda', r'\Xi', r'\Pi', r'\Sigma', r'\Upsilon', r'\Phi', r'\Psi', r'\Omega'
 }
 
+STRUCTURAL_CMDS = {
+    'includegraphics', 'label', 'cite', 'ref', 'pageref', 'url', 'href',
+    'begin', 'end', 'usepackage', 'UsePackage', 'documentclass', 'input', 'include'
+}
+
 PROTECTED_PATTERN = re.compile(
-    r'(\$[^\$]+\$|\\(?:includegraphics|label|cite|ref|pageref|url|href|begin|end|usepackage|UsePackage|documentclass|input|include)(?:\[[^\]]*\])?\{[^{}]*\}|\\[a-zA-Z]+)'
+    r'(\$[^\$]+\$|\\(?:[a-zA-Z]+)(?:\[[^\]]*\])?\{[^{}]*\}|\\[a-zA-Z]+)'
 )
 
 def escape_plain_text(s: str) -> str:
@@ -173,6 +178,8 @@ def escape_plain_text(s: str) -> str:
     s = re.sub(r'(?<!\\)%', r'\%', s)
     s = re.sub(r'(?<!\\)_', r'\_', s)
     s = re.sub(r'(?<!\\)#', r'\#', s)
+    s = re.sub(r'(?<!\\)\{', r'\{', s)
+    s = re.sub(r'(?<!\\)\}', r'\}', s)
     return s
 
 def clean_latex_text(text: str, is_math: bool = False) -> str:
@@ -215,8 +222,18 @@ def clean_latex_text(text: str, is_math: bool = False) -> str:
     for tok in tokens:
         if not tok:
             continue
-        if PROTECTED_PATTERN.fullmatch(tok):
+        if tok.startswith('$') and tok.endswith('$'):
             res.append(tok)
+        elif tok.startswith('\\'):
+            m = re.match(r'^(\\([a-zA-Z]+)(?:\[[^\]]*\])?)\{([^{}]*)\}$', tok)
+            if m:
+                cmd_prefix, cmd_name, arg_text = m.group(1), m.group(2), m.group(3)
+                if cmd_name in STRUCTURAL_CMDS:
+                    res.append(tok)
+                else:
+                    res.append(f"{cmd_prefix}{{{clean_latex_text(arg_text)}}}")
+            else:
+                res.append(tok)
         else:
             res.append(escape_plain_text(tok))
     return ''.join(res)
