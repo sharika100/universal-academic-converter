@@ -119,7 +119,10 @@ class BookMappingEngine:
             level = sec.level
             
             if level == 1:
-                cmd = f"\\chapter{{{chap_title}}}"
+                if chap_title.upper() in ["PREFACE", "FOREWORD", "ABSTRACT", "ACKNOWLEDGEMENTS", "ACKNOWLEDGEMENT"]:
+                    cmd = f"\\chapter*{{{chap_title}}}"
+                else:
+                    cmd = f"\\chapter{{{chap_title}}}"
             elif level == 2:
                 cmd = f"\\section{{{chap_title}}}"
             elif level == 3:

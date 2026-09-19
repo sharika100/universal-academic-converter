@@ -59,7 +59,14 @@ class DocxParser:
         title_idx = -1
         first_heading_idx = len(body_elements)
         
-        # Locate Title and first Section Heading dynamically
+        # Locate Title and Author metadata cleanly
+        detected_title = ""
+        detected_author = ""
+        
+        if doc.core_properties and doc.core_properties.author and doc.core_properties.author.strip():
+            raw_cp_author = doc.core_properties.author.strip()
+            detected_author = raw_cp_author.title() if (raw_cp_author.islower() or raw_cp_author.isupper()) else raw_cp_author
+
         for idx, elem in enumerate(body_elements):
             if isinstance(elem, CT_P):
                 p = DocxParagraph(elem, doc)
@@ -67,9 +74,18 @@ class DocxParser:
                 style_name = p.style.name.lower() if p.style else ""
                 if not text:
                     continue
-                if title_idx == -1 and ("title" in style_name or (len(text) > 3 and len(text) < 180 and idx < 5)):
-                    title_idx = idx
                 
+                is_frontmatter_heading = bool(re.match(r'^(PREFACE|FOREWORD|ACKNOWLEDGEM?ENTS|CONTENTS|INDEX|TABLE OF CONTENTS|ABSTRACT|CHAPTER|UNIT|MODULE)\b', text, re.I))
+
+                if title_idx == -1:
+                    if "title" in style_name:
+                        title_idx = idx
+                        detected_title = text
+                    elif not is_frontmatter_heading and len(text) > 5 and len(text) < 180 and idx < 5:
+                        if not re.match(r'^(by|author|name of author)[\s:]', text, re.I):
+                            title_idx = idx
+                            detected_title = text
+
                 is_explicit_heading = (
                     "heading" in style_name
                     or text.lower().startswith("abstract")
@@ -79,15 +95,31 @@ class DocxParser:
                 )
                 if is_explicit_heading and idx > 0:
                     first_heading_idx = min(first_heading_idx, idx)
-                    
-        # Parse Title & Author/Affiliation block (Strictly bounded to top 6 lines below Title)
+
+        # Quoted title check in preamble if title was empty or frontmatter heading
+        if not detected_title or re.match(r'^(PREFACE|FOREWORD|ACKNOWLEDGEM?ENTS|CONTENTS|ABSTRACT|CHAPTER)\b', detected_title, re.I):
+            for elem in body_elements[:20]:
+                if isinstance(elem, CT_P):
+                    p = DocxParagraph(elem, doc)
+                    txt = p.text.strip()
+                    m = re.search(r'["“]([^"”]{5,120})["”]', txt)
+                    if m:
+                        detected_title = m.group(1).strip()
+                        break
+
+        if not detected_title and doc.core_properties and doc.core_properties.title and not re.match(r'^(PREFACE|FOREWORD|ABSTRACT|CHAPTER)\b', doc.core_properties.title.strip(), re.I):
+            detected_title = doc.core_properties.title.strip()
+
+        if not detected_title:
+            base_fname = os.path.splitext(os.path.basename(docx_path))[0]
+            detected_title = re.sub(r'[-_](ds|draft|final|v\d+)', '', base_fname, flags=re.I).replace('_', ' ').replace('-', ' ').title()
+
+        udm.metadata.title = detected_title
+        udm.metadata.document_title = detected_title
+
+        # Header lines parsing for authors/affiliations
         header_lines = []
         if title_idx != -1:
-            title_p = DocxParagraph(body_elements[title_idx], doc)
-            udm.metadata.title = title_p.text.strip()
-            udm.metadata.document_title = title_p.text.strip()
-            
-            # Strictly limit header extraction to at most 6 paragraphs below title
             header_end = min(title_idx + 6, first_heading_idx)
             for idx in range(title_idx + 1, header_end):
                 elem = body_elements[idx]
@@ -102,7 +134,10 @@ class DocxParser:
             if parsed_affils:
                 udm.metadata.affiliations = parsed_affils
             udm.metadata.header_raw_text = header_raw
-            
+
+        if not udm.metadata.authors and detected_author:
+            udm.metadata.authors = [Author(name=detected_author)]
+
         consumed_header_texts = set()
         if title_idx != -1:
             consumed_header_texts.add(udm.metadata.title.lower())

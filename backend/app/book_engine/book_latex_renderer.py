@@ -54,6 +54,13 @@ class BookLatexRenderer:
                         else:
                             target_fname = raw_fname
 
+                        if target_fname.lower().endswith(".png"):
+                            try:
+                                with Image.open(io.BytesIO(img_bytes)) as test_im:
+                                    test_im.verify()
+                            except Exception:
+                                img_bytes, _ = convert_image_to_latex_compatible(img_bytes, ".emf")
+
                         img_path = os.path.join(fig_dir, target_fname)
                         with open(img_path, "wb") as fh:
                             fh.write(img_bytes)
