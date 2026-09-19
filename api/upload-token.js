@@ -48,8 +48,9 @@ module.exports = async function handler(request, response) {
         'application/pdf',
         'application/octet-stream'
       ],
-      maximumSizeInBytes: 500 * 1024 * 1024,
+      maximumSizeInBytes: 500 * 1024 * 1024, // 500 MB (up to 5 TB with multipart)
       addRandomSuffix: false,
+      validUntil: Date.now() + 24 * 60 * 60 * 1000, // 24 hours expiration window for multi-part uploads
       token: rwToken
     });
 
