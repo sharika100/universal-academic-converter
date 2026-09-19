@@ -251,6 +251,7 @@ class BookMappingEngine:
         chapters = []
         for sec in udm.sections:
             chap_title = clean_latex_text(sec.title)
+            chap_title = re.sub(r'[\r\n]+', ' ', chap_title).strip()
             level = sec.level
             
             if level == 1:
