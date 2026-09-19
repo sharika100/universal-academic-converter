@@ -22,10 +22,23 @@ UNICODE_LATEX_MAP = {
     '✔': r'\checkmark',
     '✓': r'\checkmark',
     '✅': r'\checkmark',
+    '✖': r'\times',
     '✘': r'\times',
     '✗': r'\times',
     '❌': r'\times',
     '❎': r'\times',
+    '✚': r'+',
+    '✜': r'+',
+    '✝': r'+',
+    '⟨': r'\langle',
+    '⟩': r'\rangle',
+    'ï': r'\"i',
+    '⚠️': r'[!]',
+    '👉': r'\rightarrow ',
+    '👈': r'\leftarrow ',
+    '☝': r'\uparrow ',
+    '👇': r'\downarrow ',
+    '\ufe0f': '',
     '₹': r'Rs.\ ',
     '€': r'\euro ',
     '£': r'\pounds ',
@@ -159,7 +172,7 @@ UNICODE_LATEX_MAP = {
 MATH_CMDS = {
     r'\leftrightarrow', r'\rightarrow', r'\leftarrow', r'\Rightarrow', r'\Leftarrow', r'\Leftrightarrow',
     r'\le', r'\ge', r'\neq', r'\pm', r'\times', r'\div', r'^\circ', r'\sqrt{}',
-    r'\in', r'\notin', r'\subset', r'\not\subset', r'\subseteq', r'\nsubseteq', r'\supset', r'\not\supset', r'\supseteq', r'\nsupseteq', r'\cup', r'\cap', r'\land', r'\lor', r'\neg', r'\forall', r'\exists', r'\equiv', r'\approx', r'\infty', r'\emptyset', r'\bowtie', r'\ltimes', r'\rtimes',
+    r'\in', r'\notin', r'\subset', r'\not\subset', r'\subseteq', r'\nsubseteq', r'\supset', r'\not\supset', r'\supseteq', r'\nsupseteq', r'\cup', r'\cap', r'\land', r'\lor', r'\neg', r'\forall', r'\exists', r'\equiv', r'\approx', r'\infty', r'\emptyset', r'\bowtie', r'\ltimes', r'\rtimes', r'\langle', r'\rangle',
     r'_0', r'_1', r'_2', r'_3', r'_4', r'_5', r'_6', r'_7', r'_8', r'_9',
     r'_a', r'_e', r'_h', r'_i', r'_j', r'_k', r'_l', r'_m', r'_n', r'_o', r'_p', r'_r', r'_s', r'_t', r'_u', r'_v', r'_x',
     r'^0', r'^1', r'^2', r'^3', r'^4', r'^5', r'^6', r'^7', r'^8', r'^9', r'^n', r'^i', r'^+', r'^-', r'^=', r'^(', r'^)', r'_+', r'_-', r'_=', r'_(', r'_)_ ',
@@ -204,9 +217,17 @@ def clean_latex_text(text: str, is_math: bool = False) -> str:
         for char, repl in UNICODE_LATEX_MAP.items():
             if char in part_str:
                 clean_repl = repl.strip()
+                is_text_accent_or_cmd = (
+                    clean_repl.startswith('\\text')
+                    or clean_repl.startswith(('\\"', "\\'", '\\`', '\\^', '\\~', '\\=', '\\.', '\\u', '\\v', '\\H', '\\t', '\\c', '\\d', '\\b'))
+                    or clean_repl.startswith(('\\euro', '\\pounds', '\\yen', '\\dots', '\\checkmark'))
+                    or clean_repl.startswith('`')
+                    or clean_repl.startswith("'")
+                    or clean_repl in ['~', '---', '--', '``', "''", '`', "'"]
+                )
                 is_math_cmd = (
                     clean_repl in MATH_CMDS
-                    or (clean_repl.startswith('\\') and not clean_repl.startswith('\\text') and not clean_repl.startswith('`') and not clean_repl.startswith("'") and clean_repl not in ['~', '---', '--', '``', "''", '`', "'"])
+                    or (clean_repl.startswith('\\') and not is_text_accent_or_cmd)
                     or clean_repl.startswith('_')
                     or clean_repl.startswith('^')
                 )
