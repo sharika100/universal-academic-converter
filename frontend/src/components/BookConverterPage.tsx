@@ -82,7 +82,8 @@ export const BookConverterPage: React.FC = () => {
           let downloadUrl = '';
 
           try {
-            const blob = await upload(sourceFile.name, sourceFile, {
+            const uploadPath = `uploads/${Date.now()}_${sourceFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+            const blob = await upload(uploadPath, sourceFile, {
               access: 'private',
               handleUploadUrl: '/api/upload-token',
               multipart: true,
@@ -191,7 +192,8 @@ export const BookConverterPage: React.FC = () => {
           let downloadUrl = '';
 
           try {
-            const blob = await upload(destFile.name, destFile, {
+            const destUploadPath = `uploads/${Date.now()}_${destFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+            const blob = await upload(destUploadPath, destFile, {
               access: 'private',
               handleUploadUrl: '/api/upload-token',
               multipart: true,

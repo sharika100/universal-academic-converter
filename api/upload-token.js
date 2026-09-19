@@ -35,9 +35,9 @@ module.exports = async function handler(request, response) {
       body = request.body || {};
     }
 
-    const rawFilename = body.payload?.pathname || body.pathname || body.filename || `manuscript_${Date.now()}.docx`;
-    const cleanFilename = String(rawFilename).split(/[\/\\]/).pop().replace(/[^a-zA-Z0-9._-]/g, '_');
-    const pathname = `uploads/${Date.now()}_${cleanFilename}`;
+    const rawPath = body.payload?.pathname || body.pathname || body.filename || `manuscript_${Date.now()}.docx`;
+    const cleanFilename = String(rawPath).split(/[\/\\]/).pop().replace(/[^a-zA-Z0-9._-]/g, '_');
+    const pathname = rawPath.startsWith('uploads/') ? rawPath : `uploads/${Date.now()}_${cleanFilename}`;
 
     const clientToken = await generateClientTokenFromReadWriteToken({
       pathname,
