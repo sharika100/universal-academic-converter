@@ -165,9 +165,16 @@ def escape_plain_text(s: str) -> str:
     s = re.sub(r'(?<!\\)#', r'\#', s)
     return s
 
-def clean_latex_text(text: str) -> str:
+def clean_latex_text(text: str, is_math: bool = False) -> str:
     if not text:
         return ""
+
+    if is_math:
+        for char, repl in UNICODE_LATEX_MAP.items():
+            if char in text:
+                clean_repl = repl.strip()
+                text = text.replace(char, f" {clean_repl} ")
+        return text
 
     parts = text.split('$')
     new_parts = []
@@ -261,6 +268,7 @@ class BookMappingEngine:
                     latex = blk.get("math_latex") if isinstance(blk, dict) else getattr(blk, "math_latex", "")
                     lbl = blk.get("label") if isinstance(blk, dict) else getattr(blk, "label", "")
                     if latex:
+                        latex = clean_latex_text(latex, is_math=True)
                         if "\\includegraphics" in latex:
                             latex = re.sub(
                                 r'figures/([^}\s]+)',
