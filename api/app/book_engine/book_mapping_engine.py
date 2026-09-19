@@ -89,17 +89,35 @@ UNICODE_LATEX_MAP = {
     'γ': r'\gamma',
     'δ': r'\delta',
     'ε': r'\epsilon',
+    'ζ': r'\zeta',
+    'η': r'\eta',
     'θ': r'\theta',
-    'Θ': r'\Theta',
+    'ι': r'\iota',
+    'κ': r'\kappa',
     'λ': r'\lambda',
     'μ': r'\mu',
+    'ν': r'\nu',
+    'ξ': r'\xi',
     'π': r'\pi',
+    'ρ': r'\rho',
     'σ': r'\sigma',
+    'ς': r'\varsigma',
     'τ': r'\tau',
+    'υ': r'\upsilon',
     'φ': r'\phi',
+    'χ': r'\chi',
+    'ψ': r'\psi',
     'ω': r'\omega',
+    'Γ': r'\Gamma',
     'Δ': r'\Delta',
+    'Θ': r'\Theta',
+    'Λ': r'\Lambda',
+    'Ξ': r'\Xi',
+    'Π': r'\Pi',
     'Σ': r'\Sigma',
+    'Υ': r'\Upsilon',
+    'Φ': r'\Phi',
+    'Ψ': r'\Psi',
     'Ω': r'\Omega',
 }
 
@@ -110,8 +128,8 @@ MATH_CMDS = {
     r'_0', r'_1', r'_2', r'_3', r'_4', r'_5', r'_6', r'_7', r'_8', r'_9',
     r'_a', r'_e', r'_h', r'_i', r'_j', r'_k', r'_l', r'_m', r'_n', r'_o', r'_p', r'_r', r'_s', r'_t', r'_u', r'_v', r'_x',
     r'^0', r'^1', r'^2', r'^3', r'^4', r'^5', r'^6', r'^7', r'^8', r'^9', r'^n', r'^i',
-    r'\alpha', r'\beta', r'\gamma', r'\delta', r'\epsilon', r'\theta', r'\Theta', r'\lambda', r'\mu', r'\pi', r'\sigma', r'\tau', r'\phi', r'\omega',
-    r'\Delta', r'\Sigma', r'\Omega'
+    r'\alpha', r'\beta', r'\gamma', r'\delta', r'\epsilon', r'\zeta', r'\eta', r'\theta', r'\iota', r'\kappa', r'\lambda', r'\mu', r'\nu', r'\xi', r'\pi', r'\rho', r'\sigma', r'\varsigma', r'\tau', r'\upsilon', r'\phi', r'\chi', r'\psi', r'\omega',
+    r'\Gamma', r'\Delta', r'\Theta', r'\Lambda', r'\Xi', r'\Pi', r'\Sigma', r'\Upsilon', r'\Phi', r'\Psi', r'\Omega'
 }
 
 PROTECTED_PATTERN = re.compile(
