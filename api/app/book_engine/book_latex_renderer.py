@@ -4,6 +4,8 @@ import shutil
 import base64
 import zipfile
 import logging
+import io
+from PIL import Image
 from typing import List, Dict, Any
 from app.models.udm import UniversalDocumentModel
 from app.book_engine.book_template_analyzer import BookTemplateSpecification
@@ -48,18 +50,26 @@ class BookLatexRenderer:
                     try:
                         img_bytes = base64.b64decode(b64_data)
                         orig_ext = os.path.splitext(raw_fname)[1].lower()
-                        if is_unsupported_latex_image(orig_ext):
-                            img_bytes, _ = convert_image_to_latex_compatible(img_bytes, orig_ext)
+
+                        is_png = img_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+                        is_jpeg = img_bytes.startswith(b"\xff\xd8\xff")
+                        is_pdf = img_bytes.startswith(b"%PDF")
+
+                        if is_png or is_jpeg or is_pdf:
                             target_fname = get_latex_compatible_filename(raw_fname)
                         else:
-                            target_fname = raw_fname
+                            img_bytes, out_ext = convert_image_to_latex_compatible(img_bytes, orig_ext or ".emf")
+                            base_name = os.path.splitext(raw_fname)[0]
+                            target_fname = f"{base_name}{out_ext}"
 
                         if target_fname.lower().endswith(".png"):
                             try:
                                 with Image.open(io.BytesIO(img_bytes)) as test_im:
                                     test_im.verify()
                             except Exception:
-                                img_bytes, _ = convert_image_to_latex_compatible(img_bytes, ".emf")
+                                img_bytes, out_ext = convert_image_to_latex_compatible(img_bytes, ".emf")
+                                base_name = os.path.splitext(raw_fname)[0]
+                                target_fname = f"{base_name}{out_ext}"
 
                         img_path = os.path.join(fig_dir, target_fname)
                         with open(img_path, "wb") as fh:
