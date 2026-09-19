@@ -29,6 +29,8 @@ UNICODE_LATEX_MAP = {
     '≥': r'\ge',
     '≠': r'\neq',
     '−': r'-',
+    '′': r"'",
+    '″': r"''",
     '√': r'\sqrt{}',
     '∈': r'\in',
     '∉': r'\notin',
