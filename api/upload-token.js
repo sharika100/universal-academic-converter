@@ -1,58 +1,43 @@
-const { generateClientTokenFromReadWriteToken, parseStoreIdFromDelegationToken } = require('@vercel/blob/client');
-const { issueSignedToken, presignUrl } = require('@vercel/blob');
-
-// Auto-alias store-prefixed Vercel Blob environment variables if standard names are missing
-function ensureBlobEnv() {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
-    for (const [key, val] of Object.entries(process.env)) {
-      if ((key.endsWith('_READ_WRITE_TOKEN') || key.includes('BLOB_READ_WRITE_TOKEN')) && typeof val === 'string' && val.startsWith('vercel_blob_')) {
-        process.env.BLOB_READ_WRITE_TOKEN = val;
-        break;
-      }
-    }
-  }
-  if (!process.env.BLOB_STORE_ID) {
-    for (const [key, val] of Object.entries(process.env)) {
-      if ((key.endsWith('_STORE_ID') || key.includes('BLOB_STORE_ID')) && typeof val === 'string' && val.trim() !== '') {
-        process.env.BLOB_STORE_ID = val.trim();
-        break;
-      }
-    }
-  }
-}
-
 module.exports = async function handler(request, response) {
   if (request.method !== 'POST') {
     return response.status(405).json({ error: 'Method not allowed' });
   }
 
-  ensureBlobEnv();
-
-  console.log('[UPLOAD_AUTH_ENDPOINT_CALLED] Route: /api/upload-token');
-
   try {
-    let body;
-    if (typeof request.body === 'string') {
-      try {
-        body = JSON.parse(request.body);
-      } catch {
-        body = {};
+    const blobClient = require('@vercel/blob/client');
+    const blobServer = require('@vercel/blob');
+
+    const generateClientTokenFromReadWriteToken = blobClient.generateClientTokenFromReadWriteToken;
+    const parseStoreIdFromDelegationToken = blobClient.parseStoreIdFromDelegationToken;
+    const issueSignedToken = blobServer.issueSignedToken;
+    const presignUrl = blobServer.presignUrl;
+
+    // Auto-alias store-prefixed Vercel Blob environment variables if standard names are missing
+    let rwToken = process.env.BLOB_READ_WRITE_TOKEN;
+    if (!rwToken) {
+      for (const [key, val] of Object.entries(process.env)) {
+        if ((key.endsWith('_READ_WRITE_TOKEN') || key.includes('BLOB_READ_WRITE_TOKEN')) && typeof val === 'string' && val.startsWith('vercel_blob_')) {
+          rwToken = val;
+          process.env.BLOB_READ_WRITE_TOKEN = val;
+          break;
+        }
       }
-    } else {
-      body = request.body || {};
     }
 
-    const rwToken = process.env.BLOB_READ_WRITE_TOKEN;
     if (!rwToken) {
-      console.error('[BLOB_AUTH_ERROR] Missing BLOB_READ_WRITE_TOKEN in environment');
-      return response.status(500).json({ error: 'MISSING_BLOB_TOKEN', message: 'Vercel Blob token is not configured.' });
+      return response.status(500).json({ error: 'MISSING_BLOB_TOKEN', message: 'Vercel Blob token is not configured in env.' });
+    }
+
+    let body = {};
+    if (typeof request.body === 'string') {
+      try { body = JSON.parse(request.body); } catch {}
+    } else {
+      body = request.body || {};
     }
 
     const rawFilename = body.payload?.pathname || body.pathname || body.filename || `manuscript_${Date.now()}.docx`;
     const cleanFilename = String(rawFilename).split(/[\/\\]/).pop().replace(/[^a-zA-Z0-9._-]/g, '_');
     const pathname = `uploads/${Date.now()}_${cleanFilename}`;
-
-    console.log(`[BLOB_TOKEN_REQUEST] Generating token for file: ${cleanFilename} -> pathname: ${pathname}`);
 
     const clientToken = await generateClientTokenFromReadWriteToken({
       pathname,
@@ -65,29 +50,24 @@ module.exports = async function handler(request, response) {
         'application/pdf',
         'application/octet-stream'
       ],
-      maximumSizeInBytes: 500 * 1024 * 1024, // 500 MB (up to 5 TB with multipart)
+      maximumSizeInBytes: 500 * 1024 * 1024,
       addRandomSuffix: false,
       token: rwToken
     });
 
-    // If request comes from @vercel/blob/client SDK upload() helper
     if (body && body.type === 'blob.generate-client-token') {
-      console.log(`[BLOB_SDK_TOKEN_SUCCESS] Client token issued for @vercel/blob/client upload()`);
       return response.status(200).json({
         type: 'blob.generate-client-token',
         clientToken
       });
     }
 
-    // Direct presigned PUT fallback for legacy clients
     let storeId = 'store';
     try {
       if (clientToken) {
         storeId = parseStoreIdFromDelegationToken(clientToken) || 'store';
       }
-    } catch (e) {
-      console.warn('Could not parse storeId:', e.message);
-    }
+    } catch {}
 
     const signedToken = await issueSignedToken({
       pathname,
@@ -131,11 +111,12 @@ module.exports = async function handler(request, response) {
       clientToken
     });
 
-  } catch (error) {
-    console.error('[BLOB_AUTH_ERROR] Client upload authorization failed:', error);
+  } catch (err) {
     return response.status(500).json({
-      error: 'STORAGE_AUTHORIZATION_ERROR',
-      message: error.message || 'Secure large-file storage authorization failed.'
+      error: 'DIAGNOSTIC_ERROR',
+      message: err.message,
+      name: err.name,
+      stack: err.stack ? err.stack.split('\n').slice(0, 5) : []
     });
   }
 };
