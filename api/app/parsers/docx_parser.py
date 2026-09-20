@@ -90,7 +90,7 @@ class DocxParser:
                     "heading" in style_name
                     or text.lower().startswith("abstract")
                     or text.lower().startswith("introduction")
-                    or bool(re.match(r'^(?:1\.|I\.|ONE|\d+(\.\d+)*)\s+[A-Za-z]', text, re.I))
+                    or bool(re.match(r'^(?:\d+\.|[IVXLCDM]+\.|ONE)\s+[A-Za-z]', text, re.I))
                     or any(kw in text.lower() for kw in ["hybrid", "blended", "ict for", "benefits of", "challenges in", "conclusion", "references", "related work", "methodology"])
                 )
                 if is_explicit_heading and idx > 0:
@@ -120,7 +120,7 @@ class DocxParser:
         # Header lines parsing for authors/affiliations
         header_lines = []
         if title_idx != -1:
-            header_end = min(title_idx + 6, first_heading_idx)
+            header_end = min(title_idx + 20, first_heading_idx)
             for idx in range(title_idx + 1, header_end):
                 elem = body_elements[idx]
                 if isinstance(elem, CT_P):
@@ -337,8 +337,13 @@ class DocxParser:
                 if references_found and not is_reference_section_heading(clean_title):
                     references_found = False
 
-                # Handle sequential chapter label + subtitle merging (e.g. CHAPTER 1 followed immediately by BASIC CONCEPTS OF DATA STRUCTURES)
-                if current_section and current_section.level == 1 and not current_section.blocks and (heading_level == 2 or style_name == "heading 2"):
+                # Handle sequential chapter label + subtitle merging ONLY for bare chapter keywords
+                # e.g. "CHAPTER 1" followed by "BASIC CONCEPTS OF DATA STRUCTURES" → "CHAPTER 1: BASIC CONCEPTS..."
+                # Do NOT merge if the current section already has a descriptive title (e.g. "5. Results and Discussion")
+                is_bare_chapter_label = bool(re.match(r'^(CHAPTER|UNIT|MODULE)\b', current_section.title, re.I))
+                if (current_section and current_section.level == 1 and not current_section.blocks
+                        and is_bare_chapter_label
+                        and (heading_level == 2 or style_name == "heading 2")):
                     current_section.title = f"{current_section.title}: {clean_title}"
                     return
 

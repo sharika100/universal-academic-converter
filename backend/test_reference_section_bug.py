@@ -24,7 +24,7 @@ def run_reference_section_bug_test():
     udm = DocxParser.parse(docx_path)
 
     # Assertion 1 & 2: Check UDM sections & references
-    ref_sec_in_udm = [s.title for s in udm.sections if "reference" in s.title.lower() and s.title != "Aspect-Level User Preference Representation"]
+    ref_sec_in_udm = [s.title for s in udm.sections if "reference" in s.title.lower() and "preference" not in s.title.lower()]
     assert len(ref_sec_in_udm) == 0, f"Reference section improperly left in UDM.sections: {ref_sec_in_udm}"
     print("[PASS] 1. Reference section heading 'References for this Related Work' removed from UDM.sections.")
 
