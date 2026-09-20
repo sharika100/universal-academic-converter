@@ -480,10 +480,10 @@ export const BookConverterPage: React.FC<BookConverterPageProps> = ({ onNavigate
           padding: '18px 20px',
           display: 'flex',
           flexDirection: 'column',
-          gap: '12px'
+          gap: '14px'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#F8FAFC', fontWeight: 600, fontSize: '0.92rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#F8FAFC', fontWeight: 600, fontSize: '0.96rem' }}>
               <ShieldCheck size={20} color="#10B981" />
               <span>Privacy, Data Security & Ethical Use Notice</span>
             </div>
@@ -502,39 +502,24 @@ export const BookConverterPage: React.FC<BookConverterPageProps> = ({ onNavigate
                 padding: 0
               }}
             >
-              <span>Full Policy & Guidelines</span>
+              <span>Responsible Use Guidelines</span>
               <ExternalLink size={13} />
             </button>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '10px', fontSize: '0.815rem', color: '#CBD5E1', lineHeight: '1.5' }}>
-            <div style={{ background: '#111827', padding: '12px', borderRadius: '8px', border: '1px solid #1F2937' }}>
-              <strong style={{ color: '#A5B4FC', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                <Info size={14} /> 1. Dedicated Purpose
-              </strong>
-              Your manuscript is processed solely to execute the requested book format conversion and LaTeX package compilation. Documents are not used for advertising, shared with third parties, or used for model training.
-            </div>
-
-            <div style={{ background: '#111827', padding: '12px', borderRadius: '8px', border: '1px solid #1F2937' }}>
-              <strong style={{ color: '#A5B4FC', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                <Lock size={14} /> 2. Temporary Processing & Storage
-              </strong>
-              Files are temporarily processed in ephemeral instance storage. For manuscripts above 3.5 MB, encrypted private object storage is used temporarily during transfer and queued for deletion; output packages expire with platform lifecycle policies.
-            </div>
-
-            <div style={{ background: '#111827', padding: '12px', borderRadius: '8px', border: '1px solid #1F2937' }}>
-              <strong style={{ color: '#F87171', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                <AlertCircle size={14} /> 3. Confidential & Restricted Material
-              </strong>
-              Please do not upload institutional, student, administrative, confidential, proprietary, or legally restricted documents unless you have authorized permission to process them through this service.
-            </div>
-
-            <div style={{ background: '#111827', padding: '12px', borderRadius: '8px', border: '1px solid #1F2937' }}>
-              <strong style={{ color: '#34D399', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                <CheckCircle2 size={14} /> 4. Academic & Content Integrity
-              </strong>
-              Conversions run in FORMAT ONLY mode to preserve existing text and author metadata without automated rewriting. Users remain responsible for reviewing all figures, equations, and references prior to publication.
-            </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '0.85rem', color: '#CBD5E1', lineHeight: '1.6' }}>
+            <p style={{ margin: 0 }}>
+              Your manuscript is processed only to perform the requested book format conversion and LaTeX package compilation. Manuscript content is not used for advertising, shared with third parties, or used for model training.
+            </p>
+            <p style={{ margin: 0 }}>
+              Files are temporarily processed during conversion and are not intended as permanent document storage. For larger files, private object storage may be used temporarily during processing and download.
+            </p>
+            <p style={{ margin: 0 }}>
+              Do not upload institutional, student, administrative, confidential, proprietary, or legally restricted documents unless you have the necessary authorization.
+            </p>
+            <p style={{ margin: 0 }}>
+              FORMAT ONLY preserves the existing manuscript content and author metadata and does not intentionally rewrite scientific content. You are responsible for reviewing the converted book, including text, figures, equations, tables, references, and formatting, before publication or official use.
+            </p>
           </div>
 
           {/* Explicit User Rights Confirmation Checkbox */}
@@ -543,7 +528,7 @@ export const BookConverterPage: React.FC<BookConverterPageProps> = ({ onNavigate
             alignItems: 'flex-start',
             gap: '10px',
             marginTop: '4px',
-            padding: '10px 14px',
+            padding: '12px 14px',
             background: hasAcknowledged ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.08)',
             border: hasAcknowledged ? '1px solid rgba(16, 185, 129, 0.25)' : '1px solid rgba(239, 68, 68, 0.25)',
             borderRadius: '8px',
@@ -556,7 +541,7 @@ export const BookConverterPage: React.FC<BookConverterPageProps> = ({ onNavigate
               onChange={(e) => setHasAcknowledged(e.target.checked)}
               style={{ marginTop: '3px', accentColor: '#6366F1', width: '16px', height: '16px', cursor: 'pointer' }}
             />
-            <span style={{ fontSize: '0.825rem', color: hasAcknowledged ? '#E2E8F0' : '#FCA5A5', lineHeight: 1.5 }}>
+            <span style={{ fontSize: '0.835rem', color: hasAcknowledged ? '#E2E8F0' : '#FCA5A5', lineHeight: 1.5, fontWeight: 500 }}>
               I confirm that I have the right and necessary permissions to process this document, and that it contains no unauthorized confidential or proprietary information.
             </span>
           </label>
