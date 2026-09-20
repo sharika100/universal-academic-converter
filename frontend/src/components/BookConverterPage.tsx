@@ -1,6 +1,12 @@
 import React, { useState } from 'react';
 import { upload } from '@vercel/blob/client';
-import { BookOpen, Upload, CheckCircle2, Download, AlertCircle, FileText, ArrowRight, RefreshCw, ShieldCheck } from 'lucide-react';
+import { BookOpen, Upload, CheckCircle2, Download, AlertCircle, FileText, ArrowRight, RefreshCw, ShieldCheck, Lock, Info, ExternalLink } from 'lucide-react';
+import { Header } from './Header';
+import { ResponsibleUseModal } from './ResponsibleUseModal';
+
+interface BookConverterPageProps {
+  onNavigate?: (path: string) => void;
+}
 
 async function calculateSHA256(file: File): Promise<string> {
   const buffer = await file.arrayBuffer();
@@ -26,7 +32,7 @@ function formatErrorDetail(detail: any, defaultMsg: string): string {
   return String(detail);
 }
 
-export const BookConverterPage: React.FC = () => {
+export const BookConverterPage: React.FC<BookConverterPageProps> = ({ onNavigate }) => {
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [destFile, setDestFile] = useState<File | null>(null);
   
@@ -39,18 +45,39 @@ export const BookConverterPage: React.FC = () => {
   const [destSpec, setDestSpec] = useState<any | null>(null);
   const [report, setReport] = useState<any | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [hasAcknowledged, setHasAcknowledged] = useState<boolean>(true);
+  const [hasAcknowledged, setHasAcknowledged] = useState<boolean>(false);
+  const [showResponsibleModal, setShowResponsibleModal] = useState<boolean>(false);
 
   const handleSourceUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setSourceFile(e.target.files[0]);
+      const f = e.target.files[0];
+      const ext = f.name.substring(f.name.lastIndexOf('.')).toLowerCase();
+      if (ext !== '.docx' && ext !== '.zip') {
+        setErrorMessage(`Invalid manuscript format '${ext}'. Please select a .docx manuscript file or .zip archive.`);
+        return;
+      }
+      if (f.size > 350 * 1024 * 1024) {
+        setErrorMessage(`File size (${(f.size / (1024 * 1024)).toFixed(1)} MB) exceeds the maximum allowed limit of 350 MB.`);
+        return;
+      }
+      setSourceFile(f);
       setErrorMessage(null);
     }
   };
 
   const handleDestUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setDestFile(e.target.files[0]);
+      const f = e.target.files[0];
+      const ext = f.name.substring(f.name.lastIndexOf('.')).toLowerCase();
+      if (ext !== '.zip' && ext !== '.docx') {
+        setErrorMessage(`Invalid template format '${ext}'. Please select a LaTeX book template .zip archive.`);
+        return;
+      }
+      if (f.size > 200 * 1024 * 1024) {
+        setErrorMessage(`Template size (${(f.size / (1024 * 1024)).toFixed(1)} MB) exceeds the maximum allowed limit of 200 MB.`);
+        return;
+      }
+      setDestFile(f);
       setErrorMessage(null);
     }
   };
@@ -58,6 +85,11 @@ export const BookConverterPage: React.FC = () => {
   const handleStartBookConversion = async () => {
     if (!sourceFile || !destFile) {
       setErrorMessage("Please select both a Source manuscript (.docx) and a Target Book Template (.zip).");
+      return;
+    }
+
+    if (!hasAcknowledged) {
+      setErrorMessage("Please review and accept the Privacy, Data Security & Ethical Use confirmation checkbox before converting.");
       return;
     }
 
@@ -298,6 +330,7 @@ export const BookConverterPage: React.FC = () => {
         }
         throw new Error(errDetail);
       }
+
       const tmplJson = await tmplRes.json();
       setDestSpec(tmplJson.spec);
 
@@ -322,7 +355,6 @@ export const BookConverterPage: React.FC = () => {
       if (tmplJson.spec_blob_url) convData.append('spec_blob_url', tmplJson.spec_blob_url);
       if (tmplJson.spec_download_url) convData.append('spec_download_url', tmplJson.spec_download_url);
       if (tmplJson.spec_pathname) convData.append('spec_pathname', tmplJson.spec_pathname);
-
 
       const convRes = await fetch('/api/book/convert', { method: 'POST', body: convData });
 
@@ -361,43 +393,34 @@ export const BookConverterPage: React.FC = () => {
 
   return (
     <div className="app-container">
-      {/* Header */}
-      <header className="app-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', textAlign: 'left', marginBottom: '24px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{ padding: '8px', background: 'rgba(99, 102, 241, 0.15)', color: '#A5B4FC', borderRadius: '10px', border: '1px solid rgba(99, 102, 241, 0.3)' }}>
-            <BookOpen style={{ width: '24px', height: '24px' }} />
-          </div>
-          <div>
-            <h1 style={{ fontSize: '1.8rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
-              Book Converter
-              <span className="panel-badge">
-                Isolated Beta
-              </span>
-            </h1>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>Universal Academic Format Converter Engine</p>
-          </div>
-        </div>
-        <button
-          onClick={() => window.location.href = '/'}
-          className="btn-secondary"
-          style={{ fontSize: '0.85rem', padding: '8px 16px' }}
-        >
-          ← Back to Main App
-        </button>
-      </header>
+      {/* Unified Navigation Header */}
+      <Header currentPath="/book-converter" onNavigate={onNavigate} />
 
       {/* Main Container */}
       <main style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
         
         {/* Banner */}
-        <div className="panel" style={{ background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(17, 24, 39, 0.9) 100%)', borderColor: 'rgba(99, 102, 241, 0.3)' }}>
-          <h2 style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            Convert Academic Manuscript to Book Format
-          </h2>
-          <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: '1.6', maxWidth: '800px' }}>
-            Convert your academic manuscript into a book template while preserving your content and structure.
-            Strictly enforces zero content rewriting, zero sample text leakage, and exact author metadata preservation.
-          </p>
+        <div className="panel" style={{ background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.12) 0%, rgba(17, 24, 39, 0.9) 100%)', borderColor: 'rgba(99, 102, 241, 0.3)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
+            <div>
+              <h2 style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <BookOpen style={{ width: '22px', height: '22px', color: 'var(--accent-primary)' }} />
+                Convert Academic Manuscript to Book Format
+                <span className="panel-badge">Book Engine</span>
+              </h2>
+              <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: '1.6', maxWidth: '800px', margin: 0 }}>
+                Convert your academic manuscript into a full LaTeX book project.
+                Strictly enforces zero content rewriting, zero sample text leakage, full chapter hierarchy detection, and exact author metadata preservation.
+              </p>
+            </div>
+            <button
+              onClick={() => onNavigate ? onNavigate('/') : (window.location.href = '/')}
+              className="btn-secondary"
+              style={{ fontSize: '0.85rem', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px' }}
+            >
+              <span>← Back to Paper Converter</span>
+            </button>
+          </div>
         </div>
 
         {/* Upload Panels */}
@@ -419,7 +442,7 @@ export const BookConverterPage: React.FC = () => {
                 {sourceFile ? sourceFile.name : "Select Manuscript File"}
               </span>
               <span className="dropzone-sub" style={{ marginTop: '4px' }}>
-                {sourceFile ? `${(sourceFile.size / 1024 / 1024).toFixed(2)} MB` : "Supports .docx manuscript"}
+                {sourceFile ? `${(sourceFile.size / 1024 / 1024).toFixed(2)} MB` : "Supports .docx manuscript (up to 350 MB)"}
               </span>
               <input type="file" accept=".docx,.zip" onChange={handleSourceUpload} style={{ display: 'none' }} />
             </label>
@@ -449,21 +472,116 @@ export const BookConverterPage: React.FC = () => {
 
         </div>
 
+        {/* Verified Privacy & Ethical Use Notice */}
+        <div className="panel" style={{
+          background: 'rgba(15, 23, 42, 0.85)',
+          border: '1px solid #1E293B',
+          borderRadius: '12px',
+          padding: '18px 20px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '12px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#F8FAFC', fontWeight: 600, fontSize: '0.92rem' }}>
+              <ShieldCheck size={20} color="#10B981" />
+              <span>Privacy, Data Security & Ethical Use Notice</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowResponsibleModal(true)}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#818CF8',
+                fontSize: '0.8rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: 0
+              }}
+            >
+              <span>Full Policy & Guidelines</span>
+              <ExternalLink size={13} />
+            </button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '10px', fontSize: '0.815rem', color: '#CBD5E1', lineHeight: '1.5' }}>
+            <div style={{ background: '#111827', padding: '12px', borderRadius: '8px', border: '1px solid #1F2937' }}>
+              <strong style={{ color: '#A5B4FC', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                <Info size={14} /> 1. Dedicated Purpose
+              </strong>
+              Your manuscript is processed solely to execute the requested book format conversion and LaTeX package compilation. Documents are not used for advertising, shared with third parties, or used for model training.
+            </div>
+
+            <div style={{ background: '#111827', padding: '12px', borderRadius: '8px', border: '1px solid #1F2937' }}>
+              <strong style={{ color: '#A5B4FC', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                <Lock size={14} /> 2. Temporary Processing & Storage
+              </strong>
+              Files are temporarily processed in ephemeral instance storage. For manuscripts above 3.5 MB, encrypted private object storage is used temporarily during transfer and queued for deletion; output packages expire with platform lifecycle policies.
+            </div>
+
+            <div style={{ background: '#111827', padding: '12px', borderRadius: '8px', border: '1px solid #1F2937' }}>
+              <strong style={{ color: '#F87171', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                <AlertCircle size={14} /> 3. Confidential & Restricted Material
+              </strong>
+              Please do not upload institutional, student, administrative, confidential, proprietary, or legally restricted documents unless you have authorized permission to process them through this service.
+            </div>
+
+            <div style={{ background: '#111827', padding: '12px', borderRadius: '8px', border: '1px solid #1F2937' }}>
+              <strong style={{ color: '#34D399', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                <CheckCircle2 size={14} /> 4. Academic & Content Integrity
+              </strong>
+              Conversions run in FORMAT ONLY mode to preserve existing text and author metadata without automated rewriting. Users remain responsible for reviewing all figures, equations, and references prior to publication.
+            </div>
+          </div>
+
+          {/* Explicit User Rights Confirmation Checkbox */}
+          <label style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '10px',
+            marginTop: '4px',
+            padding: '10px 14px',
+            background: hasAcknowledged ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+            border: hasAcknowledged ? '1px solid rgba(16, 185, 129, 0.25)' : '1px solid rgba(239, 68, 68, 0.25)',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            userSelect: 'none'
+          }}>
+            <input
+              type="checkbox"
+              checked={hasAcknowledged}
+              onChange={(e) => setHasAcknowledged(e.target.checked)}
+              style={{ marginTop: '3px', accentColor: '#6366F1', width: '16px', height: '16px', cursor: 'pointer' }}
+            />
+            <span style={{ fontSize: '0.825rem', color: hasAcknowledged ? '#E2E8F0' : '#FCA5A5', lineHeight: 1.5 }}>
+              I confirm that I have the right and necessary permissions to process this document, and that it contains no unauthorized confidential or proprietary information.
+            </span>
+          </label>
+        </div>
+
         {/* Options & Action */}
         <div className="panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <ShieldCheck style={{ width: '20px', height: '20px', color: 'var(--accent-success)', flexShrink: 0 }} />
             <div>
-              <p style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-main)' }}>Mode: FORMAT ONLY (Default)</p>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Content is preserved without summarization or paraphrasing.</p>
+              <p style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-main)', margin: 0 }}>Mode: FORMAT ONLY (Academic Preservation)</p>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>Content is preserved without summarization, deletion, or paraphrasing.</p>
             </div>
           </div>
 
           <button
             onClick={handleStartBookConversion}
-            disabled={!sourceFile || !destFile || analyzing || converting}
+            disabled={!sourceFile || !destFile || analyzing || converting || !hasAcknowledged}
             className="btn-primary"
-            style={{ padding: '12px 28px' }}
+            style={{
+              padding: '12px 28px',
+              opacity: (!sourceFile || !destFile || analyzing || converting || !hasAcknowledged) ? 0.6 : 1,
+              cursor: (!sourceFile || !destFile || analyzing || converting || !hasAcknowledged) ? 'not-allowed' : 'pointer'
+            }}
+            title={!hasAcknowledged ? "Please accept the privacy and user confirmation checkbox to convert" : undefined}
           >
             {analyzing || converting ? (
               <>
@@ -484,8 +602,8 @@ export const BookConverterPage: React.FC = () => {
           <div className="warning-box" style={{ background: 'rgba(239, 68, 68, 0.12)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#FCA5A5', display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
             <AlertCircle style={{ width: '20px', height: '20px', color: '#EF4444', flexShrink: 0, marginTop: '2px' }} />
             <div>
-              <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>Book Conversion Warning</p>
-              <p style={{ fontSize: '0.825rem', marginTop: '4px', lineHeight: '1.5' }}>{errorMessage}</p>
+              <p style={{ fontWeight: 600, fontSize: '0.9rem', margin: 0 }}>Book Conversion Notice</p>
+              <p style={{ fontSize: '0.825rem', marginTop: '4px', lineHeight: '1.5', margin: 0 }}>{errorMessage}</p>
             </div>
           </div>
         )}
@@ -497,8 +615,8 @@ export const BookConverterPage: React.FC = () => {
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <CheckCircle2 style={{ width: '28px', height: '28px', color: 'var(--accent-success)' }} />
                 <div>
-                  <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-main)' }}>Book Conversion Complete</h3>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Generated target LaTeX book project ZIP</p>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-main)', margin: 0 }}>Book Conversion Complete</h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>Generated target LaTeX book project ZIP package</p>
                 </div>
               </div>
               <button
@@ -526,6 +644,12 @@ export const BookConverterPage: React.FC = () => {
         )}
 
       </main>
+
+      {/* Responsible Use Policy Modal */}
+      <ResponsibleUseModal
+        isOpen={showResponsibleModal}
+        onClose={() => setShowResponsibleModal(false)}
+      />
     </div>
   );
 };

@@ -20,7 +20,7 @@ import { AdminLogin } from './admin/AdminLogin';
 import { AdminDashboard } from './admin/AdminDashboard';
 import { BookConverterPage } from './components/BookConverterPage';
 import { logAnalyticsEvent, logAnalyticsError } from './utils/analytics';
-import { Play, Search, Loader2, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { Play, Search, Loader2, ShieldCheck, ShieldAlert, BookOpen, ArrowRight } from 'lucide-react';
 
 const PROGRESS_STEPS = [
   "1. Uploading source project to private storage...",
@@ -784,8 +784,13 @@ export const App: React.FC = () => {
 
   const isConvertEnabled = !!sourceUdm && !!destSpec && !apiError && !analyzing && !converting && hasAcknowledged;
 
+  const handleNavigate = (path: string) => {
+    window.history.pushState({}, '', path);
+    setCurrentPath(path);
+  };
+
   if (currentPath === '/book-converter') {
-    return <BookConverterPage />;
+    return <BookConverterPage onNavigate={handleNavigate} />;
   }
 
   if (currentPath === '/admin/analytics' || currentPath === '/admin/login' || currentPath === '/admin') {
@@ -823,7 +828,47 @@ export const App: React.FC = () => {
 
   return (
     <div className="app-container">
-      <Header />
+      <Header currentPath={currentPath} onNavigate={handleNavigate} />
+
+      {/* Book Converter Discovery Callout Banner */}
+      <div
+        className="panel"
+        style={{
+          background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(17, 24, 39, 0.85) 100%)',
+          borderColor: 'rgba(99, 102, 241, 0.25)',
+          marginBottom: '20px',
+          padding: '16px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '16px',
+          boxShadow: '0 4px 15px rgba(0, 0, 0, 0.2)'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{ padding: '10px', background: 'rgba(99, 102, 241, 0.15)', borderRadius: '10px', color: '#A5B4FC', border: '1px solid rgba(99, 102, 241, 0.3)' }}>
+            <BookOpen size={22} />
+          </div>
+          <div>
+            <h3 style={{ fontSize: '0.98rem', fontWeight: 600, color: '#F8FAFC', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              Converting a Full Multi-Chapter Book or Syllabus?
+              <span className="panel-badge" style={{ fontSize: '0.68rem', padding: '2px 8px' }}>Book Engine</span>
+            </h3>
+            <p style={{ fontSize: '0.84rem', color: '#94A3B8', margin: '3px 0 0 0' }}>
+              Use the specialized Book Converter with full chapter hierarchy, figure mapping, and Kaobook / Standard book template engines.
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => handleNavigate('/book-converter')}
+          className="btn-secondary"
+          style={{ fontSize: '0.85rem', padding: '8px 18px', display: 'flex', alignItems: 'center', gap: '8px' }}
+        >
+          <span>Open Book Converter</span>
+          <ArrowRight size={16} />
+        </button>
+      </div>
 
       <PresetsBar
         presets={presets}

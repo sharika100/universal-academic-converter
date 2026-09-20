@@ -36,12 +36,91 @@ class BookLatexRenderer:
                         if f not in created_files:
                             created_files.append(f)
 
+        kao_sty_path = os.path.join(output_dir, "kao.sty")
+        if os.path.exists(kao_sty_path):
+            try:
+                with open(kao_sty_path, "r", encoding="utf-8", errors="ignore") as kfh:
+                    kcontent = kfh.read()
+                if r"\oldcaption" in kcontent or r"\kaobookoldcaption" in kcontent:
+                    kcontent = re.sub(r'\\AtBeginEnvironment\{(figure|table)\}\s*\{\s*%?\s*\\let\\(?:oldcaption|kaobookoldcaption)\\caption%?\s*', r'\\AtBeginEnvironment{\1}{\n\t', kcontent)
+                    kcontent = kcontent.replace(r"\oldcaption", r"\kaobookoldcaption")
+                    if r"\AtBeginDocument{\let\kaobookoldcaption\caption}" not in kcontent:
+                        kcontent = kcontent.replace(r"\newtoggle{kaocaption}", r"\newtoggle{kaocaption}" + "\n" + r"\AtBeginDocument{\let\kaobookoldcaption\caption}")
+                    with open(kao_sty_path, "w", encoding="utf-8") as kfh:
+                        kfh.write(kcontent)
+                    logger.info("Patched kao.sty to prevent infinite caption recursion bug")
+            except Exception as kerr:
+                logger.warning(f"Could not patch kao.sty: {kerr}")
+
+        kaotheorems_sty_path = os.path.join(output_dir, "kaotheorems.sty")
+        if os.path.exists(kaotheorems_sty_path):
+            try:
+                with open(kaotheorems_sty_path, "r", encoding="utf-8", errors="ignore") as thfh:
+                    thcontent = thfh.read()
+                for counter in ["proposition", "lemma", "corollary"]:
+                    thcontent = re.sub(
+                        rf'(\\declaretheorem\[[^\]]*\]\{{{counter}\}})',
+                        rf'\\let\\c@{counter}\\undefined\n\1',
+                        thcontent
+                    )
+                with open(kaotheorems_sty_path, "w", encoding="utf-8") as thfh:
+                    thfh.write(thcontent)
+                logger.info("Patched kaotheorems.sty for TeX Live 2026 thmtools compatibility")
+            except Exception as therr:
+                logger.warning(f"Could not patch kaotheorems.sty: {therr}")
+
+        kaorefs_sty_path = os.path.join(output_dir, "kaorefs.sty")
+        if os.path.exists(kaorefs_sty_path):
+            try:
+                with open(kaorefs_sty_path, "r", encoding="utf-8", errors="ignore") as rfh:
+                    rcontent = rfh.read()
+                if r"\let\openbox\relax" not in rcontent:
+                    rcontent = re.sub(
+                        r'\\let\\thmname\\relax[^\n]*\n\s*\\RequirePackage\{amsthm\}',
+                        r'\\let\\openbox\\relax\n\\RequirePackage{amsthm}\n\\let\\thmname\\relax',
+                        rcontent
+                    )
+                    with open(kaorefs_sty_path, "w", encoding="utf-8") as rfh:
+                        rfh.write(rcontent)
+                    logger.info("Patched kaorefs.sty for openbox amsthm compatibility")
+            except Exception as rerr:
+                logger.warning(f"Could not patch kaorefs.sty: {rerr}")
+
+        # Build image map from source manuscript in job_dir if b64_data was stripped for storage optimization
+        source_image_map = {}
+        parent_dir = os.path.dirname(output_dir)
+        if parent_dir and os.path.exists(parent_dir):
+            for root_d, _, files_d in os.walk(parent_dir):
+                for fd in files_d:
+                    if fd.startswith("source_") and fd.endswith(".docx"):
+                        try:
+                            import docx
+                            from app.parsers.docx_parser import DocxParser
+                            sdoc = docx.Document(os.path.join(root_d, fd))
+                            rel_map = DocxParser._extract_images(sdoc)
+                            for rId, img_info in rel_map.items():
+                                if img_info.get("b64"):
+                                    source_image_map[rId] = img_info["b64"]
+                                    if img_info.get("media_path"):
+                                        source_image_map[img_info["media_path"]] = img_info["b64"]
+                                    if img_info.get("sha256"):
+                                        source_image_map[img_info["sha256"]] = img_info["b64"]
+                        except Exception as sdoc_err:
+                            logger.warning(f"Could not extract images from source docx package: {sdoc_err}")
+
         fig_dir = os.path.join(output_dir, "figures")
         os.makedirs(fig_dir, exist_ok=True)
         fig_idx = 1
         for sec in udm.sections:
             for blk in sec.blocks:
                 b64_data = blk.get("image_data_b64") if isinstance(blk, dict) else getattr(blk, "image_data_b64", None)
+                rel_id = blk.get("rel_id") if isinstance(blk, dict) else getattr(blk, "rel_id", None)
+                sha256 = blk.get("sha256") if isinstance(blk, dict) else getattr(blk, "sha256", None)
+                media_path = blk.get("media_path") if isinstance(blk, dict) else getattr(blk, "media_path", None)
+
+                if not b64_data and source_image_map:
+                    b64_data = source_image_map.get(rel_id) or source_image_map.get(media_path) or source_image_map.get(sha256)
+
                 raw_fname = blk.get("image_filename") if isinstance(blk, dict) else getattr(blk, "image_filename", "")
                 if b64_data:
                     if not raw_fname:
@@ -110,7 +189,12 @@ class BookLatexRenderer:
         created_files.append("references.bib")
 
         mapped = BookMappingEngine.map_book_structure(udm, spec)
-        main_tex_content = BookLatexRenderer._assemble_main_tex(mapped, spec)
+        theorem_pattern = re.compile(
+            r'\\begin\{(theorem|proposition|lemma|corollary|definition|assumption|remark|example|exercise)\}',
+            re.IGNORECASE
+        )
+        has_theorems = any(theorem_pattern.search(chap) for chap in mapped.get("chapters_latex", []))
+        main_tex_content = BookLatexRenderer._assemble_main_tex(mapped, spec, has_theorems=has_theorems)
         
         # Enforce LaTeX-compatible image file extensions in main.tex
         main_tex_content = re.sub(r'figures/([^}\s]*?)\.(emf|wmf|tif|tiff|bmp|gif|webp|svg|ico)', r'figures/\1.png', main_tex_content, flags=re.I)
@@ -182,16 +266,18 @@ class BookLatexRenderer:
         return created_files
 
     @staticmethod
-    def _assemble_main_tex(mapped: Dict[str, Any], spec: BookTemplateSpecification) -> str:
+    def _assemble_main_tex(mapped: Dict[str, Any], spec: BookTemplateSpecification, has_theorems: bool = True) -> str:
         lines = []
 
         if spec.preamble_tex:
             clean_preamble = re.sub(r'\\title(?:\[.*?\])?\{[^}]*\}', '', spec.preamble_tex)
             clean_preamble = re.sub(r'\\author(?:\[.*?\])?\{[^}]*\}', '', clean_preamble)
+            if not has_theorems:
+                clean_preamble = re.sub(r'\\usepackage(?:\[.*?\])?\{kaotheorems\}\s*\n?', '', clean_preamble)
             lines.append(clean_preamble.strip())
         else:
             lines.append("\\documentclass[11pt,a4paper]{book}")
-            lines.append("\\usepackage[utf8]{utf8}")
+            lines.append("\\usepackage[utf8]{inputenc}")
             lines.append("\\usepackage{graphicx}")
             lines.append("\\usepackage{booktabs}")
             lines.append("\\usepackage{amsmath,amssymb}")

@@ -1,3 +1,4 @@
+import re
 import os
 import uuid
 import shutil
@@ -31,6 +32,26 @@ router = APIRouter(prefix="/api/book", tags=["Book Converter"])
 
 TEMP_STORAGE = os.path.join(tempfile.gettempdir(), "book_converter_storage")
 os.makedirs(TEMP_STORAGE, exist_ok=True)
+
+MAX_DIRECT_FILE_SIZE = 50 * 1024 * 1024   # 50 MB limit for direct upload requests
+MAX_TOTAL_FILE_SIZE = 350 * 1024 * 1024   # 350 MB reasonable limit for book conversions
+ALLOWED_MANUSCRIPT_EXTENSIONS = {".docx", ".zip"}
+ALLOWED_TEMPLATE_EXTENSIONS = {".zip", ".docx"}
+
+def sanitize_filename(raw_name: Optional[str], default: str = "file") -> str:
+    if not raw_name:
+        return default
+    base = os.path.basename(raw_name).strip()
+    base = re.sub(r'[\x00/\\:*?"<>|]', '_', base)
+    base = re.sub(r'\.\.+', '.', base)
+    base = re.sub(r'[^a-zA-Z0-9._-]', '_', base)
+    return base if base else default
+
+def sanitize_error_detail(err: Any) -> str:
+    msg = str(err)
+    msg = re.sub(r'[A-Za-z]:\\[^:\s\n"]+', '[internal_path]', msg)
+    msg = re.sub(r'/(?:tmp|var|home|usr|etc)/[^\s\n"]+', '[internal_path]', msg)
+    return msg
 
 def get_blob_read_write_token() -> Optional[str]:
     token = os.environ.get("BLOB_READ_WRITE_TOKEN")
@@ -180,21 +201,39 @@ def strip_udm_b64(obj: Any):
 async def analyze_book_source(
     file: UploadFile = File(...)
 ):
+    filename = sanitize_filename(file.filename, "manuscript.docx")
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_MANUSCRIPT_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported manuscript format '{ext}'. Allowed: .docx, .zip")
+
     job_id = str(uuid.uuid4())
     job_dir = os.path.join(TEMP_STORAGE, job_id)
     os.makedirs(job_dir, exist_ok=True)
 
-    filename = file.filename or "manuscript"
     file_path = os.path.join(job_dir, f"source_{filename}")
-
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    if not os.path.abspath(file_path).startswith(os.path.abspath(job_dir)):
+        raise HTTPException(status_code=400, detail="Invalid filename path traversal detected.")
 
     try:
-        if filename.endswith(".docx"):
+        file_bytes = await file.read()
+        if len(file_bytes) > MAX_DIRECT_FILE_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Direct upload limit is {MAX_DIRECT_FILE_SIZE // (1024*1024)} MB. Larger files are handled automatically via direct storage upload."
+            )
+        if len(file_bytes) > MAX_TOTAL_FILE_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File exceeds maximum allowed size of {MAX_TOTAL_FILE_SIZE // (1024*1024)} MB."
+            )
+
+        with open(file_path, "wb") as buffer:
+            buffer.write(file_bytes)
+
+        if ext == ".docx":
             udm = DocxParser.parse(file_path)
             file_tree = [{"name": filename, "type": "file"}]
-        elif filename.endswith(".zip"):
+        elif ext == ".zip":
             extracted_dir = os.path.join(job_dir, "extracted_src")
             ZipGuard.safe_extract(file_path, extracted_dir)
             udm = LatexParser.parse_project(extracted_dir)
@@ -228,23 +267,45 @@ async def analyze_book_source(
             "udm_pathname": udm_pathname,
             "file_tree": file_tree
         })
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Book source analysis failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Source analysis failed: {str(e)}")
+        logger.error(f"Book source analysis failed: {sanitize_error_detail(e)}")
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail=f"Source analysis failed: {sanitize_error_detail(e)}")
 
 @router.post("/analyze-source-from-storage")
 async def analyze_book_source_from_storage(req: BookStorageAnalysisRequest):
-    job_id = req.upload_id if req.upload_id else str(uuid.uuid4())
-    job_dir = os.path.join(TEMP_STORAGE, job_id)
+    filename = sanitize_filename(req.filename, "manuscript.docx")
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_MANUSCRIPT_EXTENSIONS:
+        trigger_blob_cleanup(req.blob_url, req.pathname)
+        raise HTTPException(status_code=400, detail=f"Unsupported manuscript format '{ext}'. Allowed: .docx, .zip")
+
+    safe_job_id = re.sub(r'[^a-zA-Z0-9_-]', '', req.upload_id) if req.upload_id else str(uuid.uuid4())
+    job_dir = os.path.join(TEMP_STORAGE, safe_job_id)
     os.makedirs(job_dir, exist_ok=True)
 
-    filename = req.filename or "manuscript.docx"
     file_path = os.path.join(job_dir, f"source_{filename}")
+    if not os.path.abspath(file_path).startswith(os.path.abspath(job_dir)):
+        trigger_blob_cleanup(req.blob_url, req.pathname)
+        raise HTTPException(status_code=400, detail="Invalid filename path traversal detected.")
 
     content = fetch_blob_bytes(req.blob_url, req.download_url, req.pathname)
     if not content:
         trigger_blob_cleanup(req.blob_url, req.pathname)
         raise HTTPException(status_code=400, detail="Failed to retrieve manuscript from Blob storage.")
+
+    if len(content) > MAX_TOTAL_FILE_SIZE:
+        trigger_blob_cleanup(req.blob_url, req.pathname)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Manuscript exceeds maximum allowed size of {MAX_TOTAL_FILE_SIZE // (1024*1024)} MB."
+        )
 
     with open(file_path, "wb") as f:
         f.write(content)
@@ -252,10 +313,10 @@ async def analyze_book_source_from_storage(req: BookStorageAnalysisRequest):
     trigger_blob_cleanup(req.blob_url, req.pathname)
 
     try:
-        if filename.endswith(".docx"):
+        if ext == ".docx":
             udm = DocxParser.parse(file_path)
             file_tree = [{"name": filename, "type": "file"}]
-        elif filename.endswith(".zip"):
+        elif ext == ".zip":
             extracted_dir = os.path.join(job_dir, "extracted_src")
             ZipGuard.safe_extract(file_path, extracted_dir)
             udm = LatexParser.parse_project(extracted_dir)
@@ -279,7 +340,7 @@ async def analyze_book_source_from_storage(req: BookStorageAnalysisRequest):
             except Exception as rm_err:
                 logger.warning(f"Could not remove source file {file_path}: {rm_err}")
 
-        udm_pathname = f"udm_state/{job_id}_source_udm.json"
+        udm_pathname = f"udm_state/{safe_job_id}_source_udm.json"
         udm_blob = put_blob_bytes(udm_pathname, udm_stripped_json_str.encode("utf-8"))
         udm_blob_url = udm_blob.get("url") if udm_blob else None
         udm_download_url = udm_blob.get("downloadUrl") if udm_blob else None
@@ -287,7 +348,7 @@ async def analyze_book_source_from_storage(req: BookStorageAnalysisRequest):
             udm_pathname = udm_blob.get("pathname")
 
         return JSONResponse({
-            "job_id": job_id,
+            "job_id": safe_job_id,
             "status": "SUCCESS",
             "udm": udm_dict_stripped,
             "udm_blob_url": udm_blob_url,
@@ -295,22 +356,45 @@ async def analyze_book_source_from_storage(req: BookStorageAnalysisRequest):
             "udm_pathname": udm_pathname,
             "file_tree": file_tree
         })
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Book storage source analysis failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Source analysis failed: {str(e)}")
+        logger.error(f"Book storage source analysis failed: {sanitize_error_detail(e)}")
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail=f"Source analysis failed: {sanitize_error_detail(e)}")
 
 @router.post("/analyze-template-from-storage")
 async def analyze_book_template_from_storage(req: BookTemplateStorageAnalysisRequest):
-    job_dir = os.path.join(TEMP_STORAGE, req.job_id)
+    filename = sanitize_filename(req.filename, "template.zip")
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_TEMPLATE_EXTENSIONS:
+        trigger_blob_cleanup(req.blob_url, req.pathname)
+        raise HTTPException(status_code=400, detail=f"Unsupported template format '{ext}'. Allowed: .zip, .docx")
+
+    safe_job_id = re.sub(r'[^a-zA-Z0-9_-]', '', req.job_id) if req.job_id else str(uuid.uuid4())
+    job_dir = os.path.join(TEMP_STORAGE, safe_job_id)
     os.makedirs(job_dir, exist_ok=True)
 
-    filename = req.filename or "template.zip"
     file_path = os.path.join(job_dir, f"template_{filename}")
+    if not os.path.abspath(file_path).startswith(os.path.abspath(job_dir)):
+        trigger_blob_cleanup(req.blob_url, req.pathname)
+        raise HTTPException(status_code=400, detail="Invalid filename path traversal detected.")
 
     content = fetch_blob_bytes(req.blob_url, req.download_url, req.pathname)
     if not content:
         trigger_blob_cleanup(req.blob_url, req.pathname)
         raise HTTPException(status_code=400, detail="Failed to retrieve template from Blob storage.")
+
+    if len(content) > MAX_TOTAL_FILE_SIZE:
+        trigger_blob_cleanup(req.blob_url, req.pathname)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Template exceeds maximum allowed size of {MAX_TOTAL_FILE_SIZE // (1024*1024)} MB."
+        )
 
     with open(file_path, "wb") as f:
         f.write(content)
@@ -318,12 +402,12 @@ async def analyze_book_template_from_storage(req: BookTemplateStorageAnalysisReq
     trigger_blob_cleanup(req.blob_url, req.pathname)
 
     try:
-        if filename.endswith(".zip"):
+        if ext == ".zip":
             tmpl_extracted_dir = os.path.join(job_dir, "extracted_tmpl")
             ZipGuard.safe_extract(file_path, tmpl_extracted_dir)
             spec = BookTemplateAnalyzer.analyze_book_template(tmpl_extracted_dir)
             file_tree = build_directory_tree(tmpl_extracted_dir)
-        elif filename.endswith(".docx"):
+        elif ext == ".docx":
             spec = BookTemplateAnalyzer.analyze_book_template(file_path)
             file_tree = [{"name": filename, "type": "file"}]
         else:
@@ -334,7 +418,7 @@ async def analyze_book_template_from_storage(req: BookTemplateStorageAnalysisReq
         with open(spec_json_path, "w", encoding="utf-8") as fh:
             fh.write(spec_json_str)
 
-        spec_pathname = f"spec_state/{req.job_id}_template_spec.json"
+        spec_pathname = f"spec_state/{safe_job_id}_template_spec.json"
         spec_blob = put_blob_bytes(spec_pathname, spec_json_str.encode("utf-8"))
         spec_blob_url = spec_blob.get("url") if spec_blob else None
         spec_download_url = spec_blob.get("downloadUrl") if spec_blob else None
@@ -342,7 +426,7 @@ async def analyze_book_template_from_storage(req: BookTemplateStorageAnalysisReq
             spec_pathname = spec_blob.get("pathname")
 
         return JSONResponse({
-            "job_id": req.job_id,
+            "job_id": safe_job_id,
             "status": "SUCCESS",
             "spec": spec.model_dump(),
             "spec_blob_url": spec_blob_url,
@@ -350,31 +434,60 @@ async def analyze_book_template_from_storage(req: BookTemplateStorageAnalysisReq
             "spec_pathname": spec_pathname,
             "file_tree": file_tree
         })
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Book storage template analysis failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Template analysis failed: {str(e)}")
+        logger.error(f"Book storage template analysis failed: {sanitize_error_detail(e)}")
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail=f"Template analysis failed: {sanitize_error_detail(e)}")
 
 @router.post("/analyze-template")
 async def analyze_book_template(
     file: UploadFile = File(...),
     job_id: str = Form(...)
 ):
-    job_dir = os.path.join(TEMP_STORAGE, job_id)
+    filename = sanitize_filename(file.filename, "template.zip")
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_TEMPLATE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported template format '{ext}'. Allowed: .zip, .docx")
+
+    safe_job_id = re.sub(r'[^a-zA-Z0-9_-]', '', job_id)
+    if not safe_job_id:
+        raise HTTPException(status_code=400, detail="Invalid job ID format.")
+
+    job_dir = os.path.join(TEMP_STORAGE, safe_job_id)
     os.makedirs(job_dir, exist_ok=True)
 
-    filename = file.filename or "template"
     file_path = os.path.join(job_dir, f"template_{filename}")
-
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    if not os.path.abspath(file_path).startswith(os.path.abspath(job_dir)):
+        raise HTTPException(status_code=400, detail="Invalid filename path traversal detected.")
 
     try:
-        if filename.endswith(".zip"):
+        file_bytes = await file.read()
+        if len(file_bytes) > MAX_DIRECT_FILE_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Direct upload limit is {MAX_DIRECT_FILE_SIZE // (1024*1024)} MB. Larger files are handled automatically via direct storage upload."
+            )
+        if len(file_bytes) > MAX_TOTAL_FILE_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Template exceeds maximum allowed size of {MAX_TOTAL_FILE_SIZE // (1024*1024)} MB."
+            )
+
+        with open(file_path, "wb") as buffer:
+            buffer.write(file_bytes)
+
+        if ext == ".zip":
             tmpl_extracted_dir = os.path.join(job_dir, "extracted_tmpl")
             ZipGuard.safe_extract(file_path, tmpl_extracted_dir)
             spec = BookTemplateAnalyzer.analyze_book_template(tmpl_extracted_dir)
             file_tree = build_directory_tree(tmpl_extracted_dir)
-        elif filename.endswith(".docx"):
+        elif ext == ".docx":
             spec = BookTemplateAnalyzer.analyze_book_template(file_path)
             file_tree = [{"name": filename, "type": "file"}]
         else:
@@ -385,7 +498,7 @@ async def analyze_book_template(
         with open(spec_json_path, "w", encoding="utf-8") as fh:
             fh.write(spec_json_str)
 
-        spec_pathname = f"spec_state/{job_id}_template_spec.json"
+        spec_pathname = f"spec_state/{safe_job_id}_template_spec.json"
         spec_blob = put_blob_bytes(spec_pathname, spec_json_str.encode("utf-8"))
         spec_blob_url = spec_blob.get("url") if spec_blob else None
         spec_download_url = spec_blob.get("downloadUrl") if spec_blob else None
@@ -393,7 +506,7 @@ async def analyze_book_template(
             spec_pathname = spec_blob.get("pathname")
 
         return JSONResponse({
-            "job_id": job_id,
+            "job_id": safe_job_id,
             "status": "SUCCESS",
             "spec": spec.model_dump(),
             "spec_blob_url": spec_blob_url,
@@ -401,9 +514,16 @@ async def analyze_book_template(
             "spec_pathname": spec_pathname,
             "file_tree": file_tree
         })
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Book template analysis failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Template analysis failed: {str(e)}")
+        logger.error(f"Book template analysis failed: {sanitize_error_detail(e)}")
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail=f"Template analysis failed: {sanitize_error_detail(e)}")
 
 @router.post("/convert")
 async def convert_book(
@@ -417,9 +537,17 @@ async def convert_book(
     spec_download_url: Optional[str] = Form(None),
     spec_pathname: Optional[str] = Form(None)
 ):
-    job_dir = os.path.join(TEMP_STORAGE, job_id)
+    safe_job_id = re.sub(r'[^a-zA-Z0-9_-]', '', job_id)
+    if not safe_job_id:
+        raise HTTPException(status_code=400, detail="Invalid job ID format.")
+
+    job_dir = os.path.join(TEMP_STORAGE, safe_job_id)
     if not os.path.exists(job_dir):
         os.makedirs(job_dir, exist_ok=True)
+
+    out_project_dir = os.path.join(job_dir, "output_project")
+    zip_out_path = os.path.join(job_dir, "converted_book.zip")
+    pdf_out_path = os.path.join(job_dir, "preview.pdf")
 
     try:
         if udm_json_str:
@@ -432,7 +560,7 @@ async def convert_book(
                     udm_bytes = fh.read()
             else:
                 target_url = udm_download_url or udm_blob_url
-                target_pathname = udm_pathname or f"udm_state/{job_id}_source_udm.json"
+                target_pathname = udm_pathname or f"udm_state/{safe_job_id}_source_udm.json"
                 udm_bytes = fetch_blob_bytes(target_url or target_pathname, udm_download_url, target_pathname)
 
             if not udm_bytes:
@@ -449,7 +577,7 @@ async def convert_book(
                     spec_bytes = fh.read()
             else:
                 target_url = spec_download_url or spec_blob_url
-                target_pathname = spec_pathname or f"spec_state/{job_id}_template_spec.json"
+                target_pathname = spec_pathname or f"spec_state/{safe_job_id}_template_spec.json"
                 spec_bytes = fetch_blob_bytes(target_url or target_pathname, spec_download_url, target_pathname)
 
             if not spec_bytes:
@@ -457,9 +585,6 @@ async def convert_book(
             spec = BookTemplateSpecification.model_validate_json(spec_bytes.decode("utf-8"))
 
         tmpl_extracted_dir = os.path.join(job_dir, "extracted_tmpl")
-        out_project_dir = os.path.join(job_dir, "output_project")
-        zip_out_path = os.path.join(job_dir, "converted_book.zip")
-        pdf_out_path = os.path.join(job_dir, "preview.pdf")
 
         created_files = BookLatexRenderer.render_book_project(
             udm=udm,
@@ -469,7 +594,7 @@ async def convert_book(
             output_zip_path=zip_out_path
         )
 
-        zip_pathname = f"converted_books/{job_id}_converted_book.zip"
+        zip_pathname = f"converted_books/{safe_job_id}_converted_book.zip"
         zip_blob_url = None
         zip_download_url = None
         if os.path.exists(zip_out_path):
@@ -506,7 +631,7 @@ async def convert_book(
         )
 
         report = ConversionReport(
-            job_id=job_id,
+            job_id=safe_job_id,
             source_format=udm.source_format or "DOCX",
             destination_format=spec.document_class or "Book Template",
             source_confidence=udm.parsing_confidence,
@@ -526,7 +651,7 @@ async def convert_book(
         )
 
         return JSONResponse({
-            "job_id": job_id,
+            "job_id": safe_job_id,
             "status": "SUCCESS",
             "report": report.model_dump(),
             "zip_blob_url": zip_blob_url,
@@ -542,8 +667,15 @@ async def convert_book(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Book conversion failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Book conversion failed: {str(e)}")
+        logger.error(f"Book conversion failed: {sanitize_error_detail(e)}")
+        if os.path.exists(out_project_dir):
+            shutil.rmtree(out_project_dir, ignore_errors=True)
+        if os.path.exists(zip_out_path):
+            try:
+                os.remove(zip_out_path)
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail=f"Book conversion failed: {sanitize_error_detail(e)}")
     finally:
         if udm_blob_url or udm_pathname:
             trigger_blob_cleanup(udm_blob_url, udm_pathname)
@@ -553,7 +685,11 @@ async def convert_book(
 
 @router.get("/download/{job_id}/zip")
 async def download_book_zip(job_id: str):
-    job_dir = os.path.join(TEMP_STORAGE, job_id)
+    safe_job_id = re.sub(r'[^a-zA-Z0-9_-]', '', job_id)
+    if not safe_job_id:
+        raise HTTPException(status_code=400, detail="Invalid job ID format.")
+
+    job_dir = os.path.join(TEMP_STORAGE, safe_job_id)
     zip_path = os.path.join(job_dir, "converted_book.zip")
 
     zip_bytes = None
@@ -561,7 +697,7 @@ async def download_book_zip(job_id: str):
         with open(zip_path, "rb") as fh:
             zip_bytes = fh.read()
     else:
-        blob_pathname = f"converted_books/{job_id}_converted_book.zip"
+        blob_pathname = f"converted_books/{safe_job_id}_converted_book.zip"
         zip_bytes = fetch_blob_bytes(blob_url=blob_pathname, pathname=blob_pathname)
 
     if not zip_bytes:
