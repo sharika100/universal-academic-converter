@@ -19,6 +19,30 @@ UNICODE_LATEX_MAP = {
     '‘': r'`',
     '’': r"'",
     '•': r'\textbullet ',
+    '✔': r'\checkmark',
+    '✓': r'\checkmark',
+    '✅': r'\checkmark',
+    '✖': r'\times',
+    '✘': r'\times',
+    '✗': r'\times',
+    '❌': r'\times',
+    '❎': r'\times',
+    '✚': r'+',
+    '✜': r'+',
+    '✝': r'+',
+    '⟨': r'\langle',
+    '⟩': r'\rangle',
+    'ï': r'\"i',
+    '⚠️': r'[!]',
+    '👉': r'\rightarrow ',
+    '👈': r'\leftarrow ',
+    '☝': r'\uparrow ',
+    '👇': r'\downarrow ',
+    '\ufe0f': '',
+    '₹': r'Rs.\ ',
+    '€': r'\euro ',
+    '£': r'\pounds ',
+    '¥': r'\yen ',
     '↔': r'\leftrightarrow',
     '→': r'\rightarrow',
     '←': r'\leftarrow',
@@ -29,62 +53,214 @@ UNICODE_LATEX_MAP = {
     '≥': r'\ge',
     '≠': r'\neq',
     '−': r'-',
+    '′': r"'",
+    '″': r"''",
     '√': r'\sqrt{}',
+    '∈': r'\in',
+    '∉': r'\notin',
+    '⊂': r'\subset',
+    '⊄': r'\not\subset ',
+    '⊆': r'\subseteq',
+    '⊈': r'\nsubseteq',
+    '⊃': r'\supset',
+    '⊅': r'\not\supset ',
+    '⊇': r'\supseteq',
+    '⊉': r'\nsupseteq',
+    '∪': r'\cup',
+    '∩': r'\cap',
+    '∧': r'\land',
+    '∨': r'\lor',
+    '¬': r'\neg',
+    '∀': r'\forall',
+    '∃': r'\exists',
+    '≡': r'\equiv',
+    '≈': r'\approx',
+    '∞': r'\infty',
+    '∅': r'\emptyset',
+    '⨝': r'\bowtie',
+    '⋈': r'\bowtie',
+    '⟕': r'\ltimes',
+    '⋉': r'\ltimes',
+    '⟖': r'\rtimes',
+    '⋊': r'\rtimes',
+    '₀': r'_0',
+    '₁': r'_1',
+    '₂': r'_2',
+    '₃': r'_3',
+    '₄': r'_4',
+    '₅': r'_5',
+    '₆': r'_6',
+    '₇': r'_7',
+    '₈': r'_8',
+    '₉': r'_9',
+    'ₐ': r'_a',
+    'ₑ': r'_e',
+    'ₕ': r'_h',
+    'ᵢ': r'_i',
+    'ⱼ': r'_j',
+    'ₖ': r'_k',
+    'ₗ': r'_l',
+    'ₘ': r'_m',
+    'ₙ': r'_n',
+    'ₒ': r'_o',
+    'ₚ': r'_p',
+    'ᵣ': r'_r',
+    'ₛ': r'_s',
+    'ₜ': r'_t',
+    'ᵤ': r'_u',
+    'ᵥ': r'_v',
+    'ₓ': r'_x',
+    '⁺': r'^+',
+    '⁻': r'^-',
+    '⁼': r'^=',
+    '⁽': r'^(',
+    '⁾': r'^)',
+    '₊': r'_+',
+    '₋': r'_-',
+    '₌': r'_=',
+    '₍': r'_(',
+    '₎': r'_)_ ',
+    '⁰': r'^0',
+    '¹': r'^1',
+    '²': r'^2',
+    '³': r'^3',
+    '⁴': r'^4',
+    '⁵': r'^5',
+    '⁶': r'^6',
+    '⁷': r'^7',
+    '⁸': r'^8',
+    '⁹': r'^9',
+    'ⁿ': r'^n',
+    'ⁱ': r'^i',
     'α': r'\alpha',
     'β': r'\beta',
     'γ': r'\gamma',
     'δ': r'\delta',
     'ε': r'\epsilon',
+    'ζ': r'\zeta',
+    'η': r'\eta',
     'θ': r'\theta',
-    'Θ': r'\Theta',
+    'ι': r'\iota',
+    'κ': r'\kappa',
     'λ': r'\lambda',
     'μ': r'\mu',
+    'ν': r'\nu',
+    'ξ': r'\xi',
     'π': r'\pi',
+    'ρ': r'\rho',
     'σ': r'\sigma',
+    'ς': r'\varsigma',
     'τ': r'\tau',
+    'υ': r'\upsilon',
     'φ': r'\phi',
+    'χ': r'\chi',
+    'ψ': r'\psi',
     'ω': r'\omega',
+    'Γ': r'\Gamma',
     'Δ': r'\Delta',
+    'Θ': r'\Theta',
+    'Λ': r'\Lambda',
+    'Ξ': r'\Xi',
+    'Π': r'\Pi',
     'Σ': r'\Sigma',
+    'Υ': r'\Upsilon',
+    'Φ': r'\Phi',
+    'Ψ': r'\Psi',
     'Ω': r'\Omega',
 }
 
 MATH_CMDS = {
     r'\leftrightarrow', r'\rightarrow', r'\leftarrow', r'\Rightarrow', r'\Leftarrow', r'\Leftrightarrow',
     r'\le', r'\ge', r'\neq', r'\pm', r'\times', r'\div', r'^\circ', r'\sqrt{}',
-    r'\alpha', r'\beta', r'\gamma', r'\delta', r'\epsilon', r'\theta', r'\Theta', r'\lambda', r'\mu', r'\pi', r'\sigma', r'\tau', r'\phi', r'\omega',
-    r'\Delta', r'\Sigma', r'\Omega'
+    r'\in', r'\notin', r'\subset', r'\not\subset', r'\subseteq', r'\nsubseteq', r'\supset', r'\not\supset', r'\supseteq', r'\nsupseteq', r'\cup', r'\cap', r'\land', r'\lor', r'\neg', r'\forall', r'\exists', r'\equiv', r'\approx', r'\infty', r'\emptyset', r'\bowtie', r'\ltimes', r'\rtimes', r'\langle', r'\rangle',
+    r'_0', r'_1', r'_2', r'_3', r'_4', r'_5', r'_6', r'_7', r'_8', r'_9',
+    r'_a', r'_e', r'_h', r'_i', r'_j', r'_k', r'_l', r'_m', r'_n', r'_o', r'_p', r'_r', r'_s', r'_t', r'_u', r'_v', r'_x',
+    r'^0', r'^1', r'^2', r'^3', r'^4', r'^5', r'^6', r'^7', r'^8', r'^9', r'^n', r'^i', r'^+', r'^-', r'^=', r'^(', r'^)', r'_+', r'_-', r'_=', r'_(', r'_)_ ',
+    r'\alpha', r'\beta', r'\gamma', r'\delta', r'\epsilon', r'\zeta', r'\eta', r'\theta', r'\iota', r'\kappa', r'\lambda', r'\mu', r'\nu', r'\xi', r'\pi', r'\rho', r'\sigma', r'\varsigma', r'\tau', r'\upsilon', r'\phi', r'\chi', r'\psi', r'\omega',
+    r'\Gamma', r'\Delta', r'\Theta', r'\Lambda', r'\Xi', r'\Pi', r'\Sigma', r'\Upsilon', r'\Phi', r'\Psi', r'\Omega'
 }
 
-def clean_latex_text(text: str) -> str:
+STRUCTURAL_CMDS = {
+    'includegraphics', 'label', 'cite', 'ref', 'pageref', 'url', 'href',
+    'begin', 'end', 'usepackage', 'UsePackage', 'documentclass', 'input', 'include'
+}
+
+PROTECTED_PATTERN = re.compile(
+    r'(\$[^\$]+\$|\\(?:[a-zA-Z]+)(?:\[[^\]]*\])?\{[^{}]*\}|\\[a-zA-Z]+)'
+)
+
+def escape_plain_text(s: str) -> str:
+    s = re.sub(r'(?<!\\)&', r'\&', s)
+    s = re.sub(r'(?<!\\)%', r'\%', s)
+    s = re.sub(r'(?<!\\)_', r'\_', s)
+    s = re.sub(r'(?<!\\)#', r'\#', s)
+    s = re.sub(r'(?<!\\)\{', r'\{', s)
+    s = re.sub(r'(?<!\\)\}', r'\}', s)
+    return s
+
+def clean_latex_text(text: str, is_math: bool = False) -> str:
     if not text:
         return ""
 
-    if not text.startswith("\\"):
-        parts = text.split('$')
-        new_parts = []
-        for idx, part in enumerate(parts):
-            in_math = (idx % 2 == 1)
-            part_str = part
-            for char, repl in UNICODE_LATEX_MAP.items():
-                if char in part_str:
-                    if repl in MATH_CMDS:
-                        if in_math:
-                            part_str = part_str.replace(char, f" {repl} ")
-                        else:
-                            part_str = part_str.replace(char, f"${repl}$")
+    if is_math:
+        for char, repl in UNICODE_LATEX_MAP.items():
+            if char in text:
+                clean_repl = repl.strip()
+                text = text.replace(char, f" {clean_repl} ")
+        return text
+
+    parts = text.split('$')
+    new_parts = []
+    for idx, part in enumerate(parts):
+        in_math = (idx % 2 == 1)
+        part_str = part
+        for char, repl in UNICODE_LATEX_MAP.items():
+            if char in part_str:
+                clean_repl = repl.strip()
+                is_text_accent_or_cmd = (
+                    clean_repl.startswith('\\text')
+                    or clean_repl.startswith(('\\"', "\\'", '\\`', '\\^', '\\~', '\\=', '\\.', '\\u', '\\v', '\\H', '\\t', '\\c', '\\d', '\\b'))
+                    or clean_repl.startswith(('\\euro', '\\pounds', '\\yen', '\\dots', '\\checkmark'))
+                    or clean_repl.startswith('`')
+                    or clean_repl.startswith("'")
+                    or clean_repl in ['~', '---', '--', '``', "''", '`', "'"]
+                )
+                is_math_cmd = (
+                    clean_repl in MATH_CMDS
+                    or (clean_repl.startswith('\\') and not is_text_accent_or_cmd)
+                    or clean_repl.startswith('_')
+                    or clean_repl.startswith('^')
+                )
+                if is_math_cmd:
+                    if in_math:
+                        part_str = part_str.replace(char, f" {clean_repl} ")
                     else:
-                        part_str = part_str.replace(char, repl)
-            new_parts.append(part_str)
-        text = '$'.join(new_parts)
+                        part_str = part_str.replace(char, f"${clean_repl}$")
+                else:
+                    part_str = part_str.replace(char, repl)
+        new_parts.append(part_str)
+    text = '$'.join(new_parts)
 
-    if not text.startswith("\\") and not text.startswith("$"):
-        text = re.sub(r'(?<!\\)&', r'\&', text)
-        text = re.sub(r'(?<!\\)%', r'\%', text)
-        text = re.sub(r'(?<!\\)_', r'\_', text)
-        text = re.sub(r'(?<!\\)#', r'\#', text)
-
-    return text
+    tokens = PROTECTED_PATTERN.split(text)
+    res = []
+    for tok in tokens:
+        if not tok:
+            continue
+        if tok.startswith('$') and tok.endswith('$'):
+            res.append(tok)
+        elif tok.startswith('\\'):
+            m = re.match(r'^(\\([a-zA-Z]+)(?:\[[^\]]*\])?)\{([^{}]*)\}$', tok)
+            if m:
+                cmd_prefix, cmd_name, arg_text = m.group(1), m.group(2), m.group(3)
+                if cmd_name in STRUCTURAL_CMDS:
+                    res.append(tok)
+                else:
+                    res.append(f"{cmd_prefix}{{{clean_latex_text(arg_text)}}}")
+            else:
+                res.append(tok)
+        else:
+            res.append(escape_plain_text(tok))
+    return ''.join(res)
 
 class BookMappingEngine:
     @staticmethod
@@ -116,6 +292,7 @@ class BookMappingEngine:
         chapters = []
         for sec in udm.sections:
             chap_title = clean_latex_text(sec.title)
+            chap_title = re.sub(r'[\r\n]+', ' ', chap_title).strip()
             level = sec.level
             
             if level == 1:
@@ -143,6 +320,7 @@ class BookMappingEngine:
                     latex = blk.get("math_latex") if isinstance(blk, dict) else getattr(blk, "math_latex", "")
                     lbl = blk.get("label") if isinstance(blk, dict) else getattr(blk, "label", "")
                     if latex:
+                        latex = clean_latex_text(latex, is_math=True)
                         if "\\includegraphics" in latex:
                             latex = re.sub(
                                 r'figures/([^}\s]+)',

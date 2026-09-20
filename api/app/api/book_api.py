@@ -334,12 +334,6 @@ async def analyze_book_source_from_storage(req: BookStorageAnalysisRequest):
         with open(udm_json_path, "w", encoding="utf-8") as fh:
             fh.write(udm_stripped_json_str)
 
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except Exception as rm_err:
-                logger.warning(f"Could not remove source file {file_path}: {rm_err}")
-
         udm_pathname = f"udm_state/{safe_job_id}_source_udm.json"
         udm_blob = put_blob_bytes(udm_pathname, udm_stripped_json_str.encode("utf-8"))
         udm_blob_url = udm_blob.get("url") if udm_blob else None
@@ -586,12 +580,20 @@ async def convert_book(
 
         tmpl_extracted_dir = os.path.join(job_dir, "extracted_tmpl")
 
+        source_docx_path = None
+        if os.path.exists(job_dir):
+            for fd in os.listdir(job_dir):
+                if (fd.startswith("source_") or "manuscript" in fd.lower()) and fd.endswith(".docx"):
+                    source_docx_path = os.path.join(job_dir, fd)
+                    break
+
         created_files = BookLatexRenderer.render_book_project(
             udm=udm,
             spec=spec,
             dest_template_dir=tmpl_extracted_dir if os.path.exists(tmpl_extracted_dir) else None,
             output_dir=out_project_dir,
-            output_zip_path=zip_out_path
+            output_zip_path=zip_out_path,
+            source_docx_path=source_docx_path
         )
 
         zip_pathname = f"converted_books/{safe_job_id}_converted_book.zip"

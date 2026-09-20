@@ -163,6 +163,23 @@ def get_analytics_dashboard(days: Optional[int] = None, username: str = Depends(
     data = analytics_db.get_dashboard_data(days=days)
     return data
 
+@router.delete("/api/admin/reset-telemetry")
+def reset_telemetry(username: str = Depends(verify_admin_auth)):
+    """
+    Admin-only endpoint: deletes ALL rows from every telemetry table to clear
+    development/test data before a production baseline.
+    Schema (tables, indexes) is preserved. No manuscript content is stored.
+    """
+    result = analytics_db.clear_telemetry()
+    if not result.get("cleared"):
+        raise HTTPException(status_code=500, detail=f"Telemetry reset failed: {result.get('error')}")
+    return {
+        "status": "CLEARED",
+        "cleared_by": username,
+        "rows_deleted": result.get("rows_deleted", {}),
+        "message": "All development/test telemetry has been cleared. Dashboard now starts from a clean production baseline."
+    }
+
 @router.get("/api/analytics/status")
 def analytics_status():
     """Diagnostic health status returning database connection provider and telemetry event counts."""

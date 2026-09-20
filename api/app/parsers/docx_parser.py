@@ -591,9 +591,12 @@ class DocxParser:
         found_rids = []
         xml_str = p._element.xml
         if any(kw in xml_str for kw in ["drawing", "imagedata", "blip", "object", "shape"]):
+            svg_rids = set(re.findall(r'<[a-zA-Z0-9_:]*svgBlip[^>]+r:embed="([^"]+)"', xml_str))
             for rId in rel_image_map.keys():
                 if f'r:embed="{rId}"' in xml_str or f'r:id="{rId}"' in xml_str:
                     found_rids.append(rId)
+            if svg_rids and any(r not in svg_rids for r in found_rids):
+                found_rids = [r for r in found_rids if r not in svg_rids]
         return found_rids
 
     @staticmethod

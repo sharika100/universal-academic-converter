@@ -212,6 +212,38 @@ def verify_admin_credentials(username: str, password: str) -> bool:
 
 verify_admin_db_credentials = verify_admin_credentials
 
+def clear_telemetry() -> Dict[str, Any]:
+    """
+    Deletes ALL rows from the four telemetry tables.
+    Schema (CREATE TABLE statements and indexes) is preserved.
+    Returns a dict of {table: rows_deleted} for every table cleared.
+    """
+    telemetry_tables = [
+        "analytics_events",
+        "analytics_errors",
+        "analytics_feedback",
+        "analytics_sessions",
+    ]
+    results: Dict[str, int] = {}
+    try:
+        conn, db_type = get_db_connection()
+        cursor = conn.cursor()
+        if db_type == "postgres":
+            for table in telemetry_tables:
+                cursor.execute(f"DELETE FROM {table};")
+                results[table] = cursor.rowcount
+        else:
+            for table in telemetry_tables:
+                cursor.execute(f"DELETE FROM {table};")
+                results[table] = cursor.rowcount
+        conn.commit()
+        conn.close()
+        logger.info(f"[ANALYTICS_TELEMETRY_CLEARED] rows deleted per table: {results}")
+        return {"cleared": True, "rows_deleted": results}
+    except Exception as e:
+        logger.error(f"[ANALYTICS_CLEAR_TELEMETRY_ERROR] {e}")
+        return {"cleared": False, "error": str(e)}
+
 def record_session(session_id: str, is_returning: bool = False, browser_family: str = "Unknown"):
     try:
         conn, db_type = get_db_connection()

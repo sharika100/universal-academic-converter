@@ -6,7 +6,7 @@ import zipfile
 import logging
 import io
 from PIL import Image
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from app.models.udm import UniversalDocumentModel
 from app.book_engine.book_template_analyzer import BookTemplateSpecification
 from app.book_engine.book_mapping_engine import BookMappingEngine
@@ -21,7 +21,8 @@ class BookLatexRenderer:
         spec: BookTemplateSpecification,
         dest_template_dir: str,
         output_dir: str,
-        output_zip_path: str
+        output_zip_path: str,
+        source_docx_path: Optional[str] = None
     ) -> List[str]:
         os.makedirs(output_dir, exist_ok=True)
         created_files = []
@@ -86,27 +87,37 @@ class BookLatexRenderer:
             except Exception as rerr:
                 logger.warning(f"Could not patch kaorefs.sty: {rerr}")
 
-        # Build image map from source manuscript in job_dir if b64_data was stripped for storage optimization
+        # Build image map from source manuscript in job_dir or source_docx_path if b64_data was stripped for storage optimization
         source_image_map = {}
+        docx_sources = []
+        if source_docx_path and os.path.exists(source_docx_path):
+            docx_sources.append(source_docx_path)
+
         parent_dir = os.path.dirname(output_dir)
         if parent_dir and os.path.exists(parent_dir):
             for root_d, _, files_d in os.walk(parent_dir):
                 for fd in files_d:
-                    if fd.startswith("source_") and fd.endswith(".docx"):
-                        try:
-                            import docx
-                            from app.parsers.docx_parser import DocxParser
-                            sdoc = docx.Document(os.path.join(root_d, fd))
-                            rel_map = DocxParser._extract_images(sdoc)
-                            for rId, img_info in rel_map.items():
-                                if img_info.get("b64"):
-                                    source_image_map[rId] = img_info["b64"]
-                                    if img_info.get("media_path"):
-                                        source_image_map[img_info["media_path"]] = img_info["b64"]
-                                    if img_info.get("sha256"):
-                                        source_image_map[img_info["sha256"]] = img_info["b64"]
-                        except Exception as sdoc_err:
-                            logger.warning(f"Could not extract images from source docx package: {sdoc_err}")
+                    if (fd.startswith("source_") or "manuscript" in fd.lower()) and fd.endswith(".docx"):
+                        full_p = os.path.join(root_d, fd)
+                        if full_p not in docx_sources:
+                            docx_sources.append(full_p)
+
+        for src_path in docx_sources:
+            try:
+                import docx
+                from app.parsers.docx_parser import DocxParser
+                sdoc = docx.Document(src_path)
+                rel_map = DocxParser._extract_images(sdoc)
+                for rId, img_info in rel_map.items():
+                    if img_info.get("b64"):
+                        source_image_map[rId] = img_info["b64"]
+                        if img_info.get("media_path"):
+                            source_image_map[img_info["media_path"]] = img_info["b64"]
+                            source_image_map[os.path.basename(img_info["media_path"])] = img_info["b64"]
+                        if img_info.get("sha256"):
+                            source_image_map[img_info["sha256"]] = img_info["b64"]
+            except Exception as sdoc_err:
+                logger.warning(f"Could not extract images from source docx {src_path}: {sdoc_err}")
 
         fig_dir = os.path.join(output_dir, "figures")
         os.makedirs(fig_dir, exist_ok=True)
@@ -119,7 +130,14 @@ class BookLatexRenderer:
                 media_path = blk.get("media_path") if isinstance(blk, dict) else getattr(blk, "media_path", None)
 
                 if not b64_data and source_image_map:
-                    b64_data = source_image_map.get(rel_id) or source_image_map.get(media_path) or source_image_map.get(sha256)
+                    orig_fname = blk.get("original_filename") if isinstance(blk, dict) else getattr(blk, "original_filename", None)
+                    b64_data = (
+                        source_image_map.get(rel_id)
+                        or source_image_map.get(media_path)
+                        or (source_image_map.get(os.path.basename(media_path)) if media_path else None)
+                        or source_image_map.get(sha256)
+                        or (source_image_map.get(orig_fname) if orig_fname else None)
+                    )
 
                 raw_fname = blk.get("image_filename") if isinstance(blk, dict) else getattr(blk, "image_filename", "")
                 if b64_data:
