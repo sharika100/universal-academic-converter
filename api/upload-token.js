@@ -48,6 +48,7 @@ module.exports = async function handler(request, response) {
         'application/x-tex',
         'text/plain',
         'application/pdf',
+        'application/json',
         'application/octet-stream'
       ],
       maximumSizeInBytes: 500 * 1024 * 1024, // 500 MB (up to 5 TB with multipart)
@@ -80,6 +81,7 @@ module.exports = async function handler(request, response) {
         'application/x-tex',
         'text/plain',
         'application/pdf',
+        'application/json',
         'application/octet-stream'
       ],
       maximumSizeInBytes: 500 * 1024 * 1024,
