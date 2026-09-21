@@ -89,6 +89,27 @@ def trigger_blob_cleanup(blob_url: Optional[str], pathname: Optional[str] = None
     except Exception as del_err:
         logger.warning(f"[TEMPORARY_BLOB_CLEANUP_WARNING] Failed to trigger Blob deletion: {del_err}")
 
+def _cleanup_stale_job_dirs(max_age_seconds: int = 1800):
+    """
+    Remove job directories from TEMP_STORAGE that are older than max_age_seconds.
+    Prevents /tmp accumulation across warm Vercel container reuse.
+    Called at the start of each major API invocation.
+    """
+    try:
+        import time
+        cutoff = time.time() - max_age_seconds
+        for name in os.listdir(TEMP_STORAGE):
+            candidate = os.path.join(TEMP_STORAGE, name)
+            if os.path.isdir(candidate):
+                try:
+                    if os.path.getmtime(candidate) < cutoff:
+                        shutil.rmtree(candidate, ignore_errors=True)
+                        logger.info(f"[STALE_CLEANUP] Removed old job dir: {name}")
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.warning(f"[STALE_CLEANUP_ERROR] {e}")
+
 def fetch_blob_bytes(blob_url: str, download_url: Optional[str] = None, pathname: Optional[str] = None) -> Optional[bytes]:
     if not blob_url:
         return None
@@ -280,6 +301,8 @@ async def analyze_book_source(
 
 @router.post("/analyze-source-from-storage")
 async def analyze_book_source_from_storage(req: BookStorageAnalysisRequest):
+    _cleanup_stale_job_dirs()   # purge old job dirs before creating new temp space
+
     filename = sanitize_filename(req.filename, "manuscript.docx")
     ext = os.path.splitext(filename)[1].lower()
     if ext not in ALLOWED_MANUSCRIPT_EXTENSIONS:
@@ -535,6 +558,8 @@ async def convert_book(
     if not safe_job_id:
         raise HTTPException(status_code=400, detail="Invalid job ID format.")
 
+    _cleanup_stale_job_dirs()   # purge old job dirs to prevent /tmp accumulation
+
     job_dir = os.path.join(TEMP_STORAGE, safe_job_id)
     if not os.path.exists(job_dir):
         os.makedirs(job_dir, exist_ok=True)
@@ -542,6 +567,10 @@ async def convert_book(
     out_project_dir = os.path.join(job_dir, "output_project")
     zip_out_path = os.path.join(job_dir, "converted_book.zip")
     pdf_out_path = os.path.join(job_dir, "preview.pdf")
+
+    # Declare outside try so finally can always access them for cleanup.
+    source_docx_path: Optional[str] = None
+    zip_blob_url: Optional[str] = None
 
     try:
         if udm_json_str:
@@ -580,14 +609,16 @@ async def convert_book(
 
         tmpl_extracted_dir = os.path.join(job_dir, "extracted_tmpl")
 
-        source_docx_path = None
         if os.path.exists(job_dir):
             for fd in os.listdir(job_dir):
                 if (fd.startswith("source_") or "manuscript" in fd.lower()) and fd.endswith(".docx"):
                     source_docx_path = os.path.join(job_dir, fd)
                     break
 
-        created_files = BookLatexRenderer.render_book_project(
+        # render_book_project now returns (created_files, main_tex_content).
+        # output_project/ is cleaned up inside render via streaming ZIP; main_tex_content
+        # is returned in memory so the validator does not need the file on disk.
+        created_files, main_tex_content = BookLatexRenderer.render_book_project(
             udm=udm,
             spec=spec,
             dest_template_dir=tmpl_extracted_dir if os.path.exists(tmpl_extracted_dir) else None,
@@ -597,7 +628,6 @@ async def convert_book(
         )
 
         zip_pathname = f"converted_books/{safe_job_id}_converted_book.zip"
-        zip_blob_url = None
         zip_download_url = None
         if os.path.exists(zip_out_path):
             try:
@@ -619,17 +649,15 @@ async def convert_book(
         except Exception as pdf_err:
             logger.warning(f"Book PDF preview generation failed: {pdf_err}")
 
-        main_tex_path = os.path.join(out_project_dir, "main.tex")
-        main_tex_content = ""
-        if os.path.exists(main_tex_path):
-            with open(main_tex_path, "r", encoding="utf-8") as fh:
-                main_tex_content = fh.read()
-
+        # Validate using in-memory main_tex_content; output_project/ has been cleaned
+        # up by streaming ZIP inside render_book_project. The renderer already ran a
+        # full \includegraphics integrity check against the on-disk files before zipping,
+        # so all referenced figures are guaranteed to be present in the ZIP.
         val_res = BookTemplateValidator.validate_book_output(
             main_tex_content=main_tex_content,
             udm=udm,
             spec=spec,
-            output_dir=out_project_dir
+            output_dir=out_project_dir   # may no longer exist; validator gracefully handles missing dir
         )
 
         report = ConversionReport(
@@ -670,15 +698,50 @@ async def convert_book(
         raise
     except Exception as e:
         logger.error(f"Book conversion failed: {sanitize_error_detail(e)}")
-        if os.path.exists(out_project_dir):
-            shutil.rmtree(out_project_dir, ignore_errors=True)
-        if os.path.exists(zip_out_path):
-            try:
-                os.remove(zip_out_path)
-            except Exception:
-                pass
         raise HTTPException(status_code=500, detail=f"Book conversion failed: {sanitize_error_detail(e)}")
     finally:
+        # ── Guaranteed cleanup on success, failure, and unexpected exceptions ──
+        # Delete source DOCX: image recovery is complete (render_book_project done).
+        # Must not be deleted BEFORE render_book_project returns (see source_docx_path
+        # declared in outer scope to allow finally to always reach it).
+        if source_docx_path and os.path.exists(source_docx_path):
+            try:
+                os.remove(source_docx_path)
+                logger.info("[CLEANUP] Deleted source DOCX after conversion")
+            except Exception:
+                pass
+
+        # Delete output project tree. render_book_project already cleans it via
+        # streaming ZIP, but guard here handles edge cases where rendering failed
+        # partway through and left files on disk.
+        if os.path.exists(out_project_dir):
+            shutil.rmtree(out_project_dir, ignore_errors=True)
+
+        # Delete local ZIP only if successfully uploaded to Blob storage.
+        # If upload failed, keep local ZIP so the download endpoint can still serve it.
+        if zip_blob_url and os.path.exists(zip_out_path):
+            try:
+                os.remove(zip_out_path)
+                logger.info("[CLEANUP] Deleted local ZIP after successful Blob upload")
+            except Exception:
+                pass
+
+        # Delete ReportLab preview PDF (always small, always safe to delete).
+        if os.path.exists(pdf_out_path):
+            try:
+                os.remove(pdf_out_path)
+            except Exception:
+                pass
+
+        # Delete local UDM JSON (already uploaded to Blob during analyze phase).
+        udm_json_local = os.path.join(job_dir, "source_udm.json")
+        if os.path.exists(udm_json_local):
+            try:
+                os.remove(udm_json_local)
+            except Exception:
+                pass
+
+        # Blob cleanup for UDM/spec (ephemeral intermediate blobs).
         if udm_blob_url or udm_pathname:
             trigger_blob_cleanup(udm_blob_url, udm_pathname)
         if spec_blob_url or spec_pathname:

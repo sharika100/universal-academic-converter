@@ -274,14 +274,32 @@ class BookLatexRenderer:
         created_files.append("main.tex")
 
         if output_zip_path:
+            # Streaming ZIP: delete each file from disk immediately after it has been
+            # written (compressed) into the ZIP. This prevents the un-zipped figures
+            # directory (~175 MB) and the full ZIP (~168 MB) from coexisting on disk
+            # simultaneously, which would exceed Vercel's 500 MB /tmp limit.
+            # At any point during zipping: disk holds (remaining files) + (ZIP-so-far).
+            # Since images are already compressed, compressed ≈ original size, so
+            # total stays roughly constant at ~175 MB rather than peaking at ~343 MB.
             with zipfile.ZipFile(output_zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
                 for root, _, files in os.walk(output_dir):
                     for f in files:
                         abs_p = os.path.join(root, f)
                         rel_p = os.path.relpath(abs_p, output_dir)
                         zf.write(abs_p, rel_p)
+                        # File is now fully captured inside the ZIP. Delete the
+                        # on-disk copy to free space immediately.
+                        try:
+                            os.remove(abs_p)
+                        except Exception:
+                            pass
+            # Remove the (now-empty) output directory tree.
+            try:
+                shutil.rmtree(output_dir, ignore_errors=True)
+            except Exception:
+                pass
 
-        return created_files
+        return created_files, main_tex_content
 
     @staticmethod
     def _assemble_main_tex(mapped: Dict[str, Any], spec: BookTemplateSpecification, has_theorems: bool = True) -> str:
