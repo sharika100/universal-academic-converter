@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sparkles, FileText, BookOpen } from 'lucide-react';
+import { Sparkles, FileText, BookOpen, Presentation } from 'lucide-react';
 
 interface HeaderProps {
   currentPath?: string;
@@ -8,6 +8,8 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ currentPath = '/', onNavigate }) => {
   const isBook = currentPath === '/book-converter';
+  const isPptx = currentPath === '/pptx-to-latex' || currentPath === '/pptx-converter';
+  const isPaper = !isBook && !isPptx;
 
   const handleNav = (path: string) => {
     if (onNavigate) {
@@ -24,7 +26,7 @@ export const Header: React.FC<HeaderProps> = ({ currentPath = '/', onNavigate })
         <Sparkles size={16} /> Universal Document Model Compiler Architecture
       </div>
       <h1>Universal Academic Format Converter</h1>
-      <p>Convert your manuscript to a different journal, conference, publisher, or book template.</p>
+      <p>Convert your manuscript to a different journal, conference, publisher, book, or presentation template.</p>
 
       {/* Navigation Mode Switcher */}
       <div style={{
@@ -36,7 +38,9 @@ export const Header: React.FC<HeaderProps> = ({ currentPath = '/', onNavigate })
         padding: '5px',
         marginTop: '20px',
         gap: '6px',
-        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.25)'
+        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.25)',
+        flexWrap: 'wrap',
+        justifyContent: 'center'
       }}>
         <button
           type="button"
@@ -47,16 +51,16 @@ export const Header: React.FC<HeaderProps> = ({ currentPath = '/', onNavigate })
             gap: '8px',
             padding: '8px 20px',
             borderRadius: '9px',
-            border: !isBook ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid transparent',
+            border: isPaper ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid transparent',
             cursor: 'pointer',
             fontSize: '0.875rem',
             fontWeight: 600,
-            background: !isBook ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
-            color: !isBook ? '#F8FAFC' : '#94A3B8',
+            background: isPaper ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
+            color: isPaper ? '#F8FAFC' : '#94A3B8',
             transition: 'all 0.15s ease'
           }}
         >
-          <FileText size={16} color={!isBook ? '#A5B4FC' : '#64748B'} />
+          <FileText size={16} color={isPaper ? '#A5B4FC' : '#64748B'} />
           <span>Research Paper Converter</span>
         </button>
 
@@ -90,6 +94,39 @@ export const Header: React.FC<HeaderProps> = ({ currentPath = '/', onNavigate })
             letterSpacing: '0.02em'
           }}>
             Multi-Chapter
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => handleNav('/pptx-to-latex')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '8px 20px',
+            borderRadius: '9px',
+            border: isPptx ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid transparent',
+            cursor: 'pointer',
+            fontSize: '0.875rem',
+            fontWeight: 600,
+            background: isPptx ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
+            color: isPptx ? '#F8FAFC' : '#94A3B8',
+            transition: 'all 0.15s ease'
+          }}
+        >
+          <Presentation size={16} color={isPptx ? '#A5B4FC' : '#64748B'} />
+          <span>PPTX → LaTeX</span>
+          <span style={{
+            fontSize: '0.68rem',
+            padding: '2px 8px',
+            borderRadius: '10px',
+            background: isPptx ? '#6366F1' : '#374151',
+            color: '#FFFFFF',
+            fontWeight: 700,
+            letterSpacing: '0.02em'
+          }}>
+            Beamer
           </span>
         </button>
       </div>

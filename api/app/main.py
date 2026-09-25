@@ -62,6 +62,13 @@ try:
 except Exception as book_err:
     logger.error(f"Failed to mount book converter router: {book_err}")
 
+try:
+    from app.api.pptx_api import router as pptx_router
+    app.include_router(pptx_router)
+    logger.info("PPTX converter router successfully mounted.")
+except Exception as pptx_err:
+    logger.error(f"Failed to mount PPTX converter router: {pptx_err}")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -180,6 +187,12 @@ async def normalize_vercel_path(request: Request, call_next):
                     job_part = parts[1].split("?")[0].split("#")[0]
                     clean_path = f"/api/book/download/{job_part}"
                     break
+            if "/api/pptx/download/" in candidate:
+                parts = candidate.split("/api/pptx/download/")
+                if len(parts) > 1:
+                    job_part = parts[1].split("?")[0].split("#")[0]
+                    clean_path = f"/api/pptx/download/{job_part}"
+                    break
 
         if not clean_path:
             clean_path = "/api/health"
@@ -229,7 +242,7 @@ INLINE_INDEX_HTML = """<!doctype html>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <script type="module" crossorigin src="/assets/index-zStcjJRn.js"></script>
+    <script type="module" crossorigin src="/assets/index-B4-dApaq.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-CuU9JyVg.css">
   </head>
   <body>

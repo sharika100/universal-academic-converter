@@ -29,3 +29,4 @@ test_extract_dest/
 *.log
 *.db
 scratch/
+ppt-latex-converter-prototype/

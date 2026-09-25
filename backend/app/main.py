@@ -61,6 +61,13 @@ try:
 except Exception as book_err:
     logger.error(f"Failed to mount book converter router: {book_err}")
 
+try:
+    from app.api.pptx_api import router as pptx_router
+    app.include_router(pptx_router)
+    logger.info("PPTX converter router successfully mounted.")
+except Exception as pptx_err:
+    logger.error(f"Failed to mount PPTX converter router: {pptx_err}")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -156,7 +163,7 @@ INLINE_INDEX_HTML = """<!doctype html>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <script type="module" crossorigin src="/assets/index-DVhIhI6O.js"></script>
+    <script type="module" crossorigin src="/assets/index-B4-dApaq.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-CuU9JyVg.css">
   </head>
   <body>

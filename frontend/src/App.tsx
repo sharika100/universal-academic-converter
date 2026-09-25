@@ -19,8 +19,9 @@ import { Footer } from './components/Footer';
 import { AdminLogin } from './admin/AdminLogin';
 import { AdminDashboard } from './admin/AdminDashboard';
 import { BookConverterPage } from './components/BookConverterPage';
+import { PptxConverterPage } from './components/PptxConverterPage';
 import { logAnalyticsEvent, logAnalyticsError } from './utils/analytics';
-import { Play, Search, Loader2, ShieldCheck, ShieldAlert, BookOpen, ArrowRight } from 'lucide-react';
+import { Play, Search, Loader2, ShieldCheck, ShieldAlert, BookOpen, Presentation, ArrowRight } from 'lucide-react';
 
 const PROGRESS_STEPS = [
   "1. Uploading source project to private storage...",
@@ -793,6 +794,10 @@ export const App: React.FC = () => {
     return <BookConverterPage onNavigate={handleNavigate} />;
   }
 
+  if (currentPath === '/pptx-to-latex' || currentPath === '/pptx-converter') {
+    return <PptxConverterPage onNavigate={handleNavigate} />;
+  }
+
   if (currentPath === '/admin/analytics' || currentPath === '/admin/login' || currentPath === '/admin') {
     if (adminToken) {
       return (
@@ -829,6 +834,46 @@ export const App: React.FC = () => {
   return (
     <div className="app-container">
       <Header currentPath={currentPath} onNavigate={handleNavigate} />
+
+      {/* PPTX Converter Discovery Callout Banner */}
+      <div
+        className="panel"
+        style={{
+          background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(17, 24, 39, 0.85) 100%)',
+          borderColor: 'rgba(16, 185, 129, 0.25)',
+          marginBottom: '16px',
+          padding: '16px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '16px',
+          boxShadow: '0 4px 15px rgba(0, 0, 0, 0.2)'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{ padding: '10px', background: 'rgba(16, 185, 129, 0.15)', borderRadius: '10px', color: '#6EE7B7', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+            <Presentation size={22} />
+          </div>
+          <div>
+            <h3 style={{ fontSize: '0.98rem', fontWeight: 600, color: '#F8FAFC', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              Converting a PowerPoint (PPTX) Deck to Beamer / LaTeX?
+              <span className="panel-badge" style={{ fontSize: '0.68rem', padding: '2px 8px', background: 'rgba(16, 185, 129, 0.2)', color: '#34D399', border: '1px solid rgba(16, 185, 129, 0.3)' }}>Presentation Engine</span>
+            </h3>
+            <p style={{ fontSize: '0.84rem', color: '#94A3B8', margin: '3px 0 0 0' }}>
+              Convert slides to native LaTeX Beamer / ltx-talk frames with table reconstruction, vector diagram recovery, and template matching.
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => handleNavigate('/pptx-to-latex')}
+          className="btn-secondary"
+          style={{ fontSize: '0.85rem', padding: '8px 18px', display: 'flex', alignItems: 'center', gap: '8px' }}
+        >
+          <span>Open PPTX Converter</span>
+          <ArrowRight size={16} />
+        </button>
+      </div>
 
       {/* Book Converter Discovery Callout Banner */}
       <div
