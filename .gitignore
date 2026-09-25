@@ -30,3 +30,4 @@ test_extract_dest/
 *.db
 scratch/
 ppt-latex-converter-prototype/
+.vercel
